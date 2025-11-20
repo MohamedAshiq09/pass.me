@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Pass.me - Decentralized Password Manager",
+  "version": "1.0.0",
+  "description": "A revolutionary password manager powered by Sui blockchain and Walrus storage.",
+  "permissions": [
+    "storage",
+    "activeTab"
+  ],
+  "action": {
+    "default_popup": "index.html",
+    "default_title": "Pass.me"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ]
+}
