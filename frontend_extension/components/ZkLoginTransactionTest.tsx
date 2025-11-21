@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Transaction } from "@mysten/sui/transactions";
 import { suiClient } from "@/lib/sui-client";
-import { ZkLoginService } from "@/lib/zklogin";
+// import { ZkLoginService } from "@/lib/zklogin"; // Commented out for development
 import { SessionManager } from "@/lib/session-manager";
 import { ArrowRight, Send } from "lucide-react";
 import { colors } from "@/app/brand";
@@ -58,9 +58,10 @@ export default function ZkLoginTransactionTest() {
 
       // Recreate ephemeral key pair from cached proof
       // This MUST be the same key that was used to generate the zkProof!
-      const ephemeralKeyPair = ZkLoginService.recreateKeyPair(
-        cached.ephemeralPrivateKey!
-      );
+      // const ephemeralKeyPair = ZkLoginService.recreateKeyPair(
+      //   cached.ephemeralPrivateKey!
+      // );
+      throw new Error("zkLogin functionality disabled for development");
 
       // Create transaction
       const tx = new Transaction();
@@ -106,10 +107,11 @@ export default function ZkLoginTransactionTest() {
 
       // Create zkLogin signature using cached proof data
       console.log("Creating zkLogin signature from cached proof...");
-      const zkLoginSignature = ZkLoginService.getTransactionSignature({
-        ephemeralSignature,
-        useCache: true, // Use cached proof data (includes zkProof, jwtToken, userSalt)
-      });
+      // const zkLoginSignature = ZkLoginService.getTransactionSignature({
+      //   ephemeralSignature,
+      //   useCache: true, // Use cached proof data (includes zkProof, jwtToken, userSalt)
+      // });
+      throw new Error("zkLogin functionality disabled for development");
 
       // Execute transaction
       console.log("Executing transaction on testnet...");

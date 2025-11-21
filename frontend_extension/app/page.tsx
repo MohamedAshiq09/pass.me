@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { SessionManager } from "@/lib/session-manager";
-import { ZkLoginService } from "@/lib/zklogin";
+// import { ZkLoginService } from "@/lib/zklogin"; // Commented out for development
 import { colors } from "./brand";
 import ZkLoginTransactionTest from "@/components/ZkLoginTransactionTest";
 import { ArrowRight, Shield, Key, Lock } from "lucide-react";
@@ -27,7 +27,7 @@ export default function Home() {
           
           if (idToken) {
             setIsLoading(true);
-            await ZkLoginService.completeZkLoginFlow(idToken);
+            // await ZkLoginService.completeZkLoginFlow(idToken); // Commented out for development
             setIsAuthenticated(true);
             // Clear hash
             window.history.replaceState(null, "", window.location.pathname);
@@ -46,8 +46,9 @@ export default function Home() {
   const handleLogin = async () => {
     try {
       setIsLoading(true);
-      const { nonce } = await ZkLoginService.initializeSession();
-      const loginUrl = ZkLoginService.getOAuthUrl(nonce);
+      // const { nonce } = await ZkLoginService.initializeSession();
+      // const loginUrl = ZkLoginService.getOAuthUrl(nonce);
+      const loginUrl = '#'; // Mock for development
       window.location.href = loginUrl;
     } catch (error) {
       console.error("Failed to initialize login:", error);

@@ -1,15 +1,20 @@
 {
-  "name": "frontend_extension",
-  "version": "0.1.0",
+  "name": "pass-me-frontend-extension",
+  "version": "1.0.0",
   "private": true,
+  "description": "Pass.me - Decentralized Password Manager Frontend & Extension",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "build:extension": "node scripts/build-extension.js",
+    "watch:extension": "webpack --watch --config webpack.config.js",
+    "dev:extension": "webpack --mode=development --config webpack.config.js",
+    "clean": "rm -rf dist .next"
   },
   "dependencies": {
-    "@mysten/sui": "^1.45.0",
+    "@mysten/sui.js": "^0.50.1",
     "@mysten/zklogin": "^0.8.1",
     "clsx": "^2.1.1",
     "jwt-decode": "^4.0.0",
@@ -24,9 +29,20 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/chrome": "^0.0.268",
     "eslint": "^9",
     "eslint-config-next": "16.0.3",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4",
+    "ts-loader": "^9.5.1",
+    "copy-webpack-plugin": "^11.0.0",
+    "html-webpack-plugin": "^5.5.4",
+    "style-loader": "^3.3.3",
+    "css-loader": "^6.8.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
