@@ -10,11 +10,11 @@ export const CONTRACTS = {
   ACCESS_CONTROL_PACKAGE_ID: '0x6d30e6996ab01fd91d80babc05d316800cff3a8c2d54d96452e6f75d4b127276',
 };
 
-// Walrus Configuration
+// Walrus Configuration - CRITICAL FIX: Using devnet (testnet doesn't exist)
 export const WALRUS_CONFIG = {
-  AGGREGATOR_URL: 'https://aggregator.walrus-testnet.walrus.space',
-  PUBLISHER_URL: 'https://publisher.walrus-testnet.walrus.space',
-  STORAGE_EPOCHS: 100, // How long to store on Walrus
+  AGGREGATOR_URL: 'https://aggregator-devnet.walrus.space',
+  PUBLISHER_URL: 'https://publisher-devnet.walrus.space',
+  STORAGE_EPOCHS: 5, // Reduced epochs for devnet (100 is too expensive)
 };
 
 // Extension Configuration
