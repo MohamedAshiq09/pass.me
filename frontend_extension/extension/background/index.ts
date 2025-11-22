@@ -162,11 +162,12 @@ async function handleRequestAutoFill(
     const { domain } = message.payload;
     console.log('🔍 Searching for passwords for domain:', domain);
 
-    // Get vault data from localStorage
-    const vaultData = localStorage.getItem('pass_me_vault_data');
+    // ✅ FIX: Use chrome.storage.local instead of localStorage
+    const result = await chrome.storage.local.get(['pass_me_vault_data']);
+    const vaultData = result.pass_me_vault_data;
 
     if (!vaultData) {
-      console.log('❌ No vault data found');
+      console.log('❌ No vault data found in chrome.storage');
       sendResponse({
         success: true,
         data: [],
@@ -274,8 +275,9 @@ async function handleSavePassword(
     const { domain, username, password } = message.payload;
     console.log('💾 Saving password for:', domain, username);
 
-    // Get current vault data
-    const vaultData = localStorage.getItem('pass_me_vault_data');
+    // ✅ FIX: Use chrome.storage.local
+    const result = await chrome.storage.local.get(['pass_me_vault_data']);
+    let vaultData = result.pass_me_vault_data;
     let vault;
 
     if (vaultData) {
@@ -314,11 +316,13 @@ async function handleSavePassword(
     vault.totalEntries = vault.entries.length;
     vault.updatedAt = Date.now();
 
-    // Save back to localStorage
-    localStorage.setItem('pass_me_vault_data', JSON.stringify({
-      vault,
-      timestamp: Date.now(),
-    }));
+    // ✅ FIX: Save to chrome.storage.local
+    await chrome.storage.local.set({
+      pass_me_vault_data: JSON.stringify({
+        vault,
+        timestamp: Date.now(),
+      })
+    });
 
     console.log('✅ Password saved successfully');
 

@@ -92,8 +92,8 @@ export default function VaultPage({
           <span className="entry-count">{entries.length} passwords</span>
         </div>
         <div className="header-actions">
-          <button 
-            onClick={onAlerts} 
+          <button
+            onClick={onAlerts}
             className={`icon-btn ${unreadAlerts > 0 ? 'has-alerts' : ''}`}
           >
             🔔
@@ -114,7 +114,7 @@ export default function VaultPage({
             onChange={(e) => setSearchQuery(e.target.value)}
           />
           {searchQuery && (
-            <button 
+            <button
               className="clear-search"
               onClick={() => setSearchQuery('')}
             >
@@ -124,8 +124,8 @@ export default function VaultPage({
         </div>
 
         <div className="category-filter">
-          <select 
-            value={selectedCategory} 
+          <select
+            value={selectedCategory}
             onChange={(e) => setSelectedCategory(e.target.value)}
           >
             {categories.map(category => (
@@ -189,15 +189,15 @@ export default function VaultPage({
       </div>
 
       <div className="fab-container">
-        <button 
-          className="fab-secondary" 
+        <button
+          className="fab-secondary"
           onClick={onGeneratePassword}
           title="Generate Password"
         >
           🎲
         </button>
-        <button 
-          className="fab" 
+        <button
+          className="fab"
           onClick={onAddPassword}
           title="Add Password"
         >
