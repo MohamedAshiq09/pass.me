@@ -14,7 +14,7 @@
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true,
     "module": "ESNext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
@@ -33,22 +33,17 @@
     ]
   },
   "include": [
-    "extension/**/*.ts",
-    "extension/**/*.tsx",
-    "contexts/**/*.ts",
-    "contexts/**/*.tsx",
-    "hooks/**/*.ts",
-    "hooks/**/*.tsx",
-    "types/**/*.ts",
-    "config/**/*.ts",
+    "next-env.d.ts",
+    "global.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
     "dist",
-    "app",
-    "components",
-    "lib"
+    "reference",
+    "extension"
   ]
 }
