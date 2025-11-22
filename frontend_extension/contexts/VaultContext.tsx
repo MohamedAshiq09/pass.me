@@ -3,6 +3,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import type { PasswordEntry } from '@/lib/api/client';
 import { hash } from '@/lib/crypto/encryption';
+import { apiClient } from '@/lib/api/client';
+import { uploadToWalrus, downloadFromWalrus } from '@/lib/walrus/client';
 
 interface Vault {
   id: string;
@@ -12,6 +14,7 @@ interface Vault {
   updatedAt: number;
   totalEntries: number;
   isLocked: boolean;
+  walrusBlobId?: string;
 }
 
 interface VaultContextType {
@@ -19,20 +22,38 @@ interface VaultContextType {
   entries: PasswordEntry[];
   isLoading: boolean;
   error: string | null;
+
+  // Core operations
+  createVault: () => Promise<void>;
+  loadVault: (vaultId: string) => Promise<void>;
+  lockVault: () => Promise<void>;
+
+  // Entry management
+  addEntry: (entryData: Omit<PasswordEntry, 'id' | 'passwordHash' | 'createdAt' | 'updatedAt' | 'usageCount' | 'lastUsed' | 'deviceWhitelist'>) => Promise<PasswordEntry>;
+  updateEntry: (entryId: string, updates: Partial<PasswordEntry>) => Promise<PasswordEntry>;
+  deleteEntry: (entryId: string) => Promise<void>;
+  getEntry: (entryId: string) => PasswordEntry | undefined;
+
+  // Search and filter
   searchEntries: (query: string) => PasswordEntry[];
   getEntriesByCategory: (category: string) => PasswordEntry[];
   getFavoriteEntries: () => PasswordEntry[];
+  getEntriesForDomain: (domain: string) => PasswordEntry[];
 
   // Usage tracking
   recordUsage: (entryId: string) => Promise<void>;
 
   // Vault info
   getVaultInfo: () => { totalEntries: number; lastUpdated: number; isLocked: boolean } | null;
+
+  // Sync
+  syncVault: () => Promise<void>;
 }
 
 export const VaultContext = createContext<VaultContextType | undefined>(undefined);
 
 const STORAGE_KEY = 'pass_me_vault_data';
+const MASTER_PASSWORD = 'demo-password-123'; // In production, this should be user's actual password
 
 export function VaultProvider({ children }: { children: ReactNode }) {
   const [vault, setVault] = useState<Vault | null>(null);
@@ -40,7 +61,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Initialize vault on mount
   useEffect(() => {
     initializeVault();
   }, []);
@@ -78,20 +98,17 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       setIsLoading(true);
       setError(null);
 
-      // Load from localStorage
       const storedData = localStorage.getItem(STORAGE_KEY);
 
       if (storedData) {
         try {
           const parsed = JSON.parse(storedData);
 
-          // Handle the vault structure
           if (parsed.vault && Array.isArray(parsed.vault.entries)) {
             console.log('✅ Loaded vault from localStorage:', parsed.vault.entries.length, 'entries');
             setVault(parsed.vault);
             setEntries(parsed.vault.entries);
           } else {
-            // Invalid structure, start fresh
             console.log('Invalid vault structure, starting fresh');
             createEmptyVault();
           }
@@ -143,6 +160,54 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const syncVault = async () => {
+    if (!vault) {
+      console.log('No vault to sync');
+      return;
+    }
+
+    try {
+      console.log('🔄 Syncing vault to Walrus and Sui...');
+
+      // Prepare vault data for upload
+      const vaultData = {
+        entries: vault.entries,
+        metadata: {
+          version: '1.0.0',
+          lastModified: Date.now(),
+        },
+      };
+
+      // Upload to Walrus
+      const blobId = await uploadToWalrus(vaultData, MASTER_PASSWORD);
+      console.log('✅ Uploaded to Walrus, blob ID:', blobId);
+
+      // Create or update vault on Sui via backend
+      const response = await apiClient.createVault(blobId);
+
+      if (response.success) {
+        console.log('✅ Vault synced to blockchain');
+
+        // Update local vault with blob ID
+        const updatedVault = {
+          ...vault,
+          walrusBlobId: blobId,
+          updatedAt: Date.now(),
+        };
+
+        setVault(updatedVault);
+        saveToLocalStorage(updatedVault);
+      } else {
+        console.error('Failed to sync to blockchain:', response.error);
+        throw new Error(response.error || 'Blockchain sync failed');
+      }
+    } catch (err) {
+      console.error('Sync error:', err);
+      setError('Failed to sync vault');
+      throw err;
+    }
+  };
+
   const addEntry = async (entryData: Omit<PasswordEntry, 'id' | 'passwordHash' | 'createdAt' | 'updatedAt' | 'usageCount' | 'lastUsed' | 'deviceWhitelist'>) => {
     try {
       if (!vault) throw new Error('No vault loaded');
@@ -170,6 +235,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       saveToLocalStorage(updatedVault);
 
       console.log('✅ Password added successfully!');
+
+      // Sync to Walrus and Sui in background
+      syncVault().catch(err => {
+        console.error('Background sync failed:', err);
+        // Don't throw - entry is saved locally
+      });
+
       return newEntry;
     } catch (err) {
       console.error('Error adding entry:', err);
@@ -195,6 +267,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       setVault(updatedVault);
       setEntries(updatedEntries);
       saveToLocalStorage(updatedVault);
+
+      // Sync in background
+      syncVault().catch(err => console.error('Background sync failed:', err));
 
       const updatedEntry = updatedEntries.find(e => e.id === entryId);
       if (!updatedEntry) throw new Error('Entry not found');
@@ -223,6 +298,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       setVault(updatedVault);
       setEntries(updatedEntries);
       saveToLocalStorage(updatedVault);
+
+      // Sync in background
+      syncVault().catch(err => console.error('Background sync failed:', err));
     } catch (err) {
       console.error('Error deleting entry:', err);
       setError('Failed to delete password entry');
@@ -248,6 +326,25 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
   const getFavoriteEntries = () => {
     return entries.filter(entry => entry.favorite);
+  };
+
+  const getEntriesForDomain = (domain: string) => {
+    // Normalize domain (remove www., protocol, trailing slash)
+    const normalizedDomain = domain
+      .toLowerCase()
+      .replace(/^(https?:\/\/)?(www\.)?/, '')
+      .replace(/\/$/, '');
+
+    return entries.filter(entry => {
+      const normalizedEntryDomain = entry.domain
+        .toLowerCase()
+        .replace(/^(https?:\/\/)?(www\.)?/, '')
+        .replace(/\/$/, '');
+
+      return normalizedEntryDomain === normalizedDomain ||
+        normalizedEntryDomain.includes(normalizedDomain) ||
+        normalizedDomain.includes(normalizedEntryDomain);
+    });
   };
 
   const recordUsage = async (entryId: string) => {
@@ -288,8 +385,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     searchEntries,
     getEntriesByCategory,
     getFavoriteEntries,
+    getEntriesForDomain,
     recordUsage,
     getVaultInfo,
+    syncVault,
   };
 
   return <VaultContext.Provider value={value}>{children}</VaultContext.Provider>;
