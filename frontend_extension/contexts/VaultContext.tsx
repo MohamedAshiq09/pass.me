@@ -65,8 +65,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     initializeVault();
   }, []);
 
-  // ✅ CRITICAL FIX: Enhanced saveToLocalStorage with verification
-  const saveToLocalStorage = (updatedVault: Vault) => {
+  // ✅ FIXED: Use chrome.storage.local for extensions, localStorage as fallback
+  const saveToLocalStorage = async (updatedVault: Vault) => {
     try {
       const dataToStore = {
         vault: updatedVault,
@@ -75,7 +75,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       const jsonStr = JSON.stringify(dataToStore);
 
-      console.log('💾 Saving to localStorage:', {
+      console.log('💾 Saving to storage:', {
         key: STORAGE_KEY,
         entriesCount: updatedVault.entries.length,
         dataSize: jsonStr.length,
@@ -83,18 +83,34 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         entryDomains: updatedVault.entries.map(e => e.domain)
       });
 
-      localStorage.setItem(STORAGE_KEY, jsonStr);
+      // ✅ Check if chrome.storage is available (extension environment)
+      if (typeof chrome !== 'undefined' && chrome.storage) {
+        // Use chrome.storage for extension
+        await chrome.storage.local.set({ [STORAGE_KEY]: jsonStr });
+        console.log('✅ Saved to chrome.storage.local');
+      } else {
+        // Fallback to localStorage for web
+        localStorage.setItem(STORAGE_KEY, jsonStr);
+        console.log('✅ Saved to localStorage (web fallback)');
+      }
 
-      // ✅ VERIFY save worked immediately
-      const verification = localStorage.getItem(STORAGE_KEY);
+      // ✅ Verify save worked
+      let verification: string | null = null;
+      if (typeof chrome !== 'undefined' && chrome.storage) {
+        const result = await chrome.storage.local.get([STORAGE_KEY]);
+        verification = result[STORAGE_KEY] || null;
+      } else {
+        verification = localStorage.getItem(STORAGE_KEY);
+      }
+
       if (!verification) {
-        console.error('⚠️ CRITICAL: localStorage.setItem succeeded but data not found on read!');
-        throw new Error('localStorage verification failed');
+        console.error('⚠️ CRITICAL: Storage verification failed!');
+        throw new Error('Storage verification failed');
       } else {
         try {
           const verifyParsed = JSON.parse(verification);
           const savedCount = verifyParsed.vault?.entries?.length || 0;
-          console.log('✅ Save verified:', savedCount, 'entries in localStorage');
+          console.log('✅ Save verified:', savedCount, 'entries in storage');
 
           if (savedCount !== updatedVault.entries.length) {
             console.error('⚠️ WARNING: Mismatch in entry count!', {
@@ -107,20 +123,19 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         }
       }
     } catch (err) {
-      console.error('❌ Failed to save to localStorage:', err);
+      console.error('❌ Failed to save to storage:', err);
 
-      // Try alternative storage if localStorage is full
+      // Try alternative storage if quota exceeded
       if (err instanceof Error && err.name === 'QuotaExceededError') {
-        console.error('💾 localStorage quota exceeded! Size:', JSON.stringify(updatedVault).length);
-        // Could implement cleanup here
+        console.error('💾 Storage quota exceeded! Size:', JSON.stringify(updatedVault).length);
         alert('Storage quota exceeded. Please delete some passwords.');
       }
 
-      throw err; // Re-throw so caller knows save failed
+      throw err;
     }
   };
 
-  const createEmptyVault = () => {
+  const createEmptyVault = async () => {
     console.log('🆕 Creating empty vault');
     const emptyVault: Vault = {
       id: 'vault-' + Date.now(),
@@ -133,21 +148,30 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     };
     setVault(emptyVault);
     setEntries([]);
-    saveToLocalStorage(emptyVault);
+    await saveToLocalStorage(emptyVault);
     console.log('✅ Empty vault created and saved');
   };
 
-  // ✅ CRITICAL FIX: Enhanced initializeVault with better logging
+  // ✅ FIXED: Enhanced initializeVault with chrome.storage support
   const initializeVault = async () => {
     try {
       setIsLoading(true);
       setError(null);
 
-      console.log('🔍 Initializing vault - checking localStorage...');
+      console.log('🔍 Initializing vault - checking storage...');
       console.log('📦 Storage key:', STORAGE_KEY);
 
-      const storedData = localStorage.getItem(STORAGE_KEY);
-      console.log('📦 localStorage raw data:', storedData ? `Found (${storedData.length} chars)` : 'Empty');
+      let storedData: string | null = null;
+
+      // ✅ Try chrome.storage first (extension), then localStorage (web)
+      if (typeof chrome !== 'undefined' && chrome.storage) {
+        const result = await chrome.storage.local.get([STORAGE_KEY]);
+        storedData = result[STORAGE_KEY] || null;
+        console.log('📦 chrome.storage data:', storedData ? `Found (${storedData.length} chars)` : 'Empty');
+      } else {
+        storedData = localStorage.getItem(STORAGE_KEY);
+        console.log('📦 localStorage data:', storedData ? `Found (${storedData.length} chars)` : 'Empty');
+      }
 
       if (storedData) {
         try {
@@ -170,7 +194,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
               createdAt: new Date(e.createdAt).toISOString()
             })));
 
-            // ✅ CRITICAL: Set BOTH vault and entries atomically
+            // ✅ Set BOTH vault and entries atomically
             const vaultData = parsed.vault;
             setVault(vaultData);
             setEntries(vaultData.entries);
@@ -184,29 +208,28 @@ export function VaultProvider({ children }: { children: ReactNode }) {
               });
             }, 100);
           } else {
-            console.warn('⚠️ Invalid vault structure in localStorage:', {
+            console.warn('⚠️ Invalid vault structure:', {
               hasVault: !!parsed.vault,
               vaultType: typeof parsed.vault,
               hasEntries: !!parsed.vault?.entries,
               entriesType: typeof parsed.vault?.entries,
               isArray: Array.isArray(parsed.vault?.entries)
             });
-            console.warn('📄 Full parsed data:', parsed);
-            createEmptyVault();
+            await createEmptyVault();
           }
         } catch (parseError) {
           console.error('❌ Failed to parse vault data:', parseError);
           console.error('📄 Raw data that failed:', storedData.substring(0, 200) + '...');
-          createEmptyVault();
+          await createEmptyVault();
         }
       } else {
-        console.log('ℹ️ No vault in localStorage - creating new empty vault');
-        createEmptyVault();
+        console.log('ℹ️ No vault in storage - creating new empty vault');
+        await createEmptyVault();
       }
     } catch (err) {
       console.error('❌ Failed to initialize vault:', err);
       setError('Failed to initialize vault');
-      createEmptyVault();
+      await createEmptyVault();
     } finally {
       setIsLoading(false);
       console.log('✅ Vault initialization complete');
@@ -217,7 +240,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     try {
       setIsLoading(true);
       setError(null);
-      createEmptyVault();
+      await createEmptyVault();
     } catch (err) {
       console.error('Error creating vault:', err);
       setError('Failed to create vault');
@@ -236,7 +259,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     try {
       setVault(null);
       setEntries([]);
-      localStorage.removeItem(STORAGE_KEY);
+
+      // Clear from both storage types
+      if (typeof chrome !== 'undefined' && chrome.storage) {
+        await chrome.storage.local.remove([STORAGE_KEY]);
+      } else {
+        localStorage.removeItem(STORAGE_KEY);
+      }
     } catch (err) {
       console.error('Error locking vault:', err);
       setError('Failed to lock vault');
@@ -248,10 +277,18 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     try {
       console.log('🔄 Syncing vault to Walrus and Sui...');
 
-      // ✅ CRITICAL FIX: Get fresh vault data from localStorage (source of truth)
-      const storedData = localStorage.getItem(STORAGE_KEY);
+      // ✅ Get fresh vault data from storage (source of truth)
+      let storedData: string | null = null;
+
+      if (typeof chrome !== 'undefined' && chrome.storage) {
+        const result = await chrome.storage.local.get([STORAGE_KEY]);
+        storedData = result[STORAGE_KEY] || null;
+      } else {
+        storedData = localStorage.getItem(STORAGE_KEY);
+      }
+
       if (!storedData) {
-        console.log('⚠️ No vault in localStorage to sync');
+        console.log('⚠️ No vault in storage to sync');
         return;
       }
 
@@ -261,20 +298,20 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         currentVault = parsed.vault;
 
         if (!currentVault || !Array.isArray(currentVault.entries)) {
-          console.error('⚠️ Invalid vault structure in localStorage');
+          console.error('⚠️ Invalid vault structure in storage');
           return;
         }
 
         console.log('📦 Syncing vault with', currentVault.entries.length, 'entries');
         console.log('📋 Entries to sync:', currentVault.entries.map(e => ({ id: e.id, domain: e.domain })));
       } catch (parseErr) {
-        console.error('❌ Failed to parse vault from localStorage:', parseErr);
+        console.error('❌ Failed to parse vault from storage:', parseErr);
         return;
       }
 
-      // Prepare vault data for upload using FRESH data
+      // Prepare vault data for upload
       const vaultData = {
-        entries: currentVault.entries,  // ✅ Use fresh entries from localStorage!
+        entries: currentVault.entries,
         metadata: {
           version: '1.0.0',
           lastModified: Date.now(),
@@ -293,9 +330,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       if (response.success) {
         console.log('✅ Vault synced to blockchain');
 
-        // ✅ CRITICAL: Update vault with blob ID WITHOUT changing entries
+        // ✅ Update vault with blob ID WITHOUT changing entries
         const updatedVault = {
-          ...currentVault,  // ✅ Use fresh vault state from localStorage!
+          ...currentVault,
           walrusBlobId: blobId,
           updatedAt: Date.now(),
         };
@@ -304,10 +341,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
         // Update React state
         setVault(updatedVault);
-        setEntries(updatedVault.entries);  // ✅ Also update entries state!
+        setEntries(updatedVault.entries);
 
-        // Save to localStorage
-        saveToLocalStorage(updatedVault);
+        // Save to storage
+        await saveToLocalStorage(updatedVault);
 
         console.log('✅ Sync complete -', updatedVault.entries.length, 'entries preserved');
       } else {
@@ -355,22 +392,20 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         newEntryCount: updatedEntries.length
       });
 
-      // ✅ CRITICAL: Update state AND localStorage BEFORE syncing
+      // ✅ Update state AND storage BEFORE syncing
       setVault(updatedVault);
       setEntries(updatedEntries);
-      saveToLocalStorage(updatedVault);
+      await saveToLocalStorage(updatedVault);
 
       console.log('✅ Password entry added and saved successfully!');
-      console.log('⏳ Waiting for localStorage to flush...');
+      console.log('⏳ Waiting for storage to flush...');
 
-      // ✅ CRITICAL FIX: Wait for state to settle before syncing
-      // This ensures localStorage has the latest data before sync reads it
+      // ✅ Wait for state to settle before syncing
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // Sync to Walrus and Sui in background
       syncVault().catch(err => {
         console.error('⚠️ Background sync failed (entry still saved locally):', err);
-        // Don't throw - entry is saved locally
       });
 
       return newEntry;
@@ -397,7 +432,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       setVault(updatedVault);
       setEntries(updatedEntries);
-      saveToLocalStorage(updatedVault);
+      await saveToLocalStorage(updatedVault);
 
       // Sync in background
       syncVault().catch(err => console.error('Background sync failed:', err));
@@ -428,7 +463,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       setVault(updatedVault);
       setEntries(updatedEntries);
-      saveToLocalStorage(updatedVault);
+      await saveToLocalStorage(updatedVault);
 
       // Sync in background
       syncVault().catch(err => console.error('Background sync failed:', err));

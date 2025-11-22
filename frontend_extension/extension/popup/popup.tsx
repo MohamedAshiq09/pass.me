@@ -33,7 +33,7 @@ function PopupApp() {
   return (
     <div className="popup-container">
       {/* Removed login page - go directly to vault */}
-      
+
       {currentPage === 'vault' && (
         <VaultPage
           onAddPassword={() => setCurrentPage('add')}
@@ -43,11 +43,11 @@ function PopupApp() {
           onAlerts={() => setCurrentPage('alerts')}
         />
       )}
-      
+
       {currentPage === 'add' && (
         <AddPasswordPage onBack={handleBack} onSave={handleBack} />
       )}
-      
+
       {currentPage === 'view' && selectedEntryId && (
         <ViewPasswordPage
           entryId={selectedEntryId}
@@ -55,15 +55,15 @@ function PopupApp() {
           onDelete={handleBack}
         />
       )}
-      
+
       {currentPage === 'generator' && (
         <GeneratorPage onBack={handleBack} />
       )}
-      
+
       {currentPage === 'settings' && (
         <SettingsPage onBack={handleBack} />
       )}
-      
+
       {currentPage === 'alerts' && (
         <AlertsPage onBack={handleBack} />
       )}
@@ -111,7 +111,7 @@ if (container) {
   fallbackContainer.id = 'root';
   fallbackContainer.style.cssText = 'width: 375px; min-height: 500px; background: #f5f5f5;';
   document.body.appendChild(fallbackContainer);
-  
+
   const root = createRoot(fallbackContainer);
   root.render(<App />);
 }
