@@ -1,42 +1,57 @@
-import walrusClient from './client';
 import { walrusConfig } from '../../config/walrus.config';
 import logger from '../../utils/logger';
+import axios from 'axios';
 
 class WalrusStorageService {
   /**
-   * Store data on Walrus
+   * Store data on Walrus - FIXED with correct API endpoint
    */
   public async store(data: Buffer): Promise<string> {
     try {
-      const response = await walrusClient.getPublisher().put(
-        `/v1/store?epochs=${walrusConfig.epochs}`,
-        data,
-        {
-          headers: {
-            'Content-Type': 'application/octet-stream',
-          },
-        }
-      );
+      // ✅ FIXED: Use correct Walrus API endpoint /v1/blobs (NOT /v1/store)
+      const publisherUrl = 'https://publisher.walrus-testnet.walrus.space';
+      const url = `${publisherUrl}/v1/blobs?epochs=${walrusConfig.epochs}`;
+
+      logger.info('Uploading to Walrus testnet:', {
+        url,
+        size: data.length,
+        epochs: walrusConfig.epochs
+      });
+
+      const response = await axios.put(url, data, {
+        headers: {
+          'Content-Type': 'application/octet-stream',
+        },
+        timeout: 60000, // 60 second timeout
+        maxContentLength: 50 * 1024 * 1024, // 50MB max
+      });
 
       if (response.data?.newlyCreated?.blobObject?.blobId) {
         const blobId = response.data.newlyCreated.blobObject.blobId;
-        logger.info('Data stored on Walrus', {
-          blobId,
-          size: data.length,
-        });
+        logger.info('✅ Data stored on Walrus', { blobId, size: data.length });
         return blobId;
       } else if (response.data?.alreadyCertified?.blobId) {
         const blobId = response.data.alreadyCertified.blobId;
-        logger.info('Data already exists on Walrus', {
-          blobId,
-          size: data.length,
-        });
+        logger.info('✅ Data already exists on Walrus', { blobId });
         return blobId;
       }
 
-      throw new Error('Unexpected response format from Walrus');
+      throw new Error('Unexpected Walrus response format');
     } catch (error: any) {
-      logger.error('Error storing data on Walrus:', error);
+      // Better error handling
+      if (error.code === 'ECONNABORTED') {
+        throw new Error('Walrus upload timeout - try smaller files or check network');
+      }
+      if (error.response?.status === 522) {
+        throw new Error('Walrus publisher timeout - try again or use backend proxy');
+      }
+
+      logger.error('Walrus upload error:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data
+      });
+
       throw new Error(`Failed to store on Walrus: ${error.message}`);
     }
   }
@@ -69,18 +84,19 @@ class WalrusStorageService {
   }
 
   /**
-   * Store encrypted vault data
+   * Store encrypted vault data (receives encrypted data from frontend)
    */
-  public async storeVaultData(vaultData: {
-    entries: any[];
-    metadata: any;
-    timestamp: number;
-  }): Promise<string> {
+  public async storeVaultData(vaultData: any): Promise<string> {
     try {
       logger.info('Storing vault data on Walrus', {
-        entriesCount: vaultData.entries.length,
+        dataType: typeof vaultData,
+        hasEntries: !!vaultData.entries,
+        hasCiphertext: !!vaultData.ciphertext,
       });
 
+      // The vaultData is already encrypted by the frontend
+      // It contains: { ciphertext, iv, salt }
+      // We just need to store it as-is
       return await this.storeJSON(vaultData);
     } catch (error) {
       logger.error('Error storing vault data:', error);

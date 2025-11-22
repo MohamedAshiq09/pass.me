@@ -11,10 +11,19 @@ export const CONTRACTS = {
 };
 
 // Walrus Configuration - CRITICAL FIX: Using devnet (testnet doesn't exist)
+// ✅ FIXED Walrus Configuration
 export const WALRUS_CONFIG = {
-  AGGREGATOR_URL: 'https://aggregator-devnet.walrus.space',
-  PUBLISHER_URL: 'https://publisher-devnet.walrus.space',
-  STORAGE_EPOCHS: 5, // Reduced epochs for devnet (100 is too expensive)
+  // Use TESTNET (not devnet!) - devnet is unstable
+  AGGREGATOR_URL: 'https://aggregator.walrus-testnet.walrus.space',
+  PUBLISHER_URL: 'https://publisher.walrus-testnet.walrus.space',
+
+  // Upload Relay for browser-based uploads (recommended for production)
+  UPLOAD_RELAY_URL: 'https://upload-relay.testnet.walrus.space',
+
+  STORAGE_EPOCHS: 5,
+
+  // Use backend proxy to avoid browser limitations
+  USE_BACKEND_PROXY: true,
 };
 
 // Extension Configuration
