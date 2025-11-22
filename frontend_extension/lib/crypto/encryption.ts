@@ -1,4 +1,5 @@
 // AES-256-GCM Encryption/Decryption for Vault Data
+// ✅ FIXED: TypeScript type errors for Uint8Array compatibility
 
 import { SECURITY } from '@/config/constants';
 
@@ -10,16 +11,20 @@ export interface EncryptedData {
 
 /**
  * Generate a random salt
+ * ✅ FIX: Cast to Uint8Array to satisfy TypeScript
  */
 export function generateSalt(): Uint8Array {
-    return crypto.getRandomValues(new Uint8Array(SECURITY.SALT_LENGTH));
+    const array = new Uint8Array(SECURITY.SALT_LENGTH);
+    return crypto.getRandomValues(array) as Uint8Array;
 }
 
 /**
  * Generate a random IV (Initialization Vector)
+ * ✅ FIX: Cast to Uint8Array to satisfy TypeScript
  */
 export function generateIV(): Uint8Array {
-    return crypto.getRandomValues(new Uint8Array(SECURITY.IV_LENGTH));
+    const array = new Uint8Array(SECURITY.IV_LENGTH);
+    return crypto.getRandomValues(array) as Uint8Array;
 }
 
 /**
@@ -42,10 +47,11 @@ export async function deriveKey(
     );
 
     // Derive AES-GCM key
+    // ✅ FIX: Cast salt to satisfy TypeScript
     return crypto.subtle.deriveKey(
         {
             name: 'PBKDF2',
-            salt,
+            salt: salt as Uint8Array<ArrayBuffer>,
             iterations: SECURITY.KEY_DERIVATION_ITERATIONS,
             hash: 'SHA-256',
         },
@@ -75,10 +81,11 @@ export async function encrypt(
         const key = await deriveKey(password, salt);
 
         // Encrypt data
+        // ✅ FIX: Cast iv to satisfy TypeScript
         const ciphertext = await crypto.subtle.encrypt(
             {
                 name: 'AES-GCM',
-                iv,
+                iv: iv as Uint8Array<ArrayBuffer>,
                 tagLength: SECURITY.TAG_LENGTH * 8, // bits
             },
             key,
@@ -111,13 +118,15 @@ export async function decrypt(
         const salt = base64ToArrayBuffer(encryptedData.salt);
 
         // Derive decryption key
-        const key = await deriveKey(password, new Uint8Array(salt));
+        // ✅ FIX: Cast salt to satisfy TypeScript
+        const key = await deriveKey(password, new Uint8Array(salt) as Uint8Array<ArrayBuffer>);
 
         // Decrypt data
+        // ✅ FIX: Cast iv to satisfy TypeScript
         const decrypted = await crypto.subtle.decrypt(
             {
                 name: 'AES-GCM',
-                iv: new Uint8Array(iv),
+                iv: new Uint8Array(iv) as Uint8Array<ArrayBuffer>,
                 tagLength: SECURITY.TAG_LENGTH * 8,
             },
             key,
@@ -144,8 +153,9 @@ export async function hash(data: string): Promise<string> {
 }
 
 // Helper functions
-function arrayBufferToBase64(buffer: ArrayBuffer): string {
-    const bytes = new Uint8Array(buffer);
+// ✅ FIX: Accept both ArrayBuffer and Uint8Array
+function arrayBufferToBase64(buffer: ArrayBuffer | Uint8Array): string {
+    const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
     let binary = '';
     for (let i = 0; i < bytes.byteLength; i++) {
         binary += String.fromCharCode(bytes[i]);
