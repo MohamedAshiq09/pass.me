@@ -3,6 +3,9 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 // import type { ExtensionMessage, ExtensionResponse, AlertEvent } from '@/types';
 
+// Declare chrome global for TypeScript
+declare const chrome: typeof globalThis.chrome | undefined;
+
 // Temporary types for development
 interface ExtensionMessage {
   type: string;
@@ -77,7 +80,8 @@ export function ExtensionProvider({ children }: { children: ReactNode }) {
 
   const handleExtensionMessage = (
     message: ExtensionMessage,
-    sender: chrome.runtime.MessageSender,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    sender: any,
     sendResponse: (response: ExtensionResponse) => void
   ) => {
     switch (message.type) {

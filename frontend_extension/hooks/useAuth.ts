@@ -1,3 +1,3 @@
-// This hook is now directly exported from AuthContext.tsx
-// Use: import { useAuth } from '@/contexts/AuthContext';
+// Re-export useAuth from AuthContext
 export { useAuth } from '@/contexts/AuthContext';
+export type { AuthContextType } from '@/contexts/AuthContext';

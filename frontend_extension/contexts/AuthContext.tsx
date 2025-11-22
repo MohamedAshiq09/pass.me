@@ -1,167 +1,153 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-// import type { ZkLoginSession, SessionData } from '@/types';
-// import { STORAGE_KEYS, EXTENSION_CONFIG } from '@/config/constants';
+import { SessionManager } from '@/lib/session-manager';
+import { ZkLoginService } from '@/lib/zklogin';
 
-// Temporary types for development without zkLogin
-interface SessionData {
-  userId: string;
-  deviceId: string;
-  expiresAt: number;
-  ephemeralKeyPair?: string;
-}
-
-interface ZkLoginSession {
-  jwt: string;
-  salt: string;
-  maxEpoch: number;
-  randomness: string;
-  ephemeralKeyPair: {
-    publicKey: string;
-    privateKey: string;
-  };
-  userAddress: string;
-}
-
-interface AuthContextType {
-  session: SessionData | null;
-  zkLoginSession: ZkLoginSession | null;
+export interface AuthContextType {
+  address: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (zkSession: ZkLoginSession) => Promise<void>;
-  logout: () => Promise<void>;
-  refreshSession: () => Promise<void>;
+  zkProof: any;
+  jwtToken: string | null;
+  userSalt: string | null;
+  ephemeralPrivateKey: string | null;
+  maxEpoch: number | null;
+  randomness: string | null;
+  logout: () => void;
+  checkAuth: () => void;
+  setAuthData: (data: {
+    address: string;
+    zkProof: any;
+    jwtToken: string;
+    userSalt: string;
+    ephemeralPrivateKey: string;
+    maxEpoch: number;
+    randomness: string;
+  }) => void;
 }
 
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<SessionData | null>(null);
-  const [zkLoginSession, setZkLoginSession] = useState<ZkLoginSession | null>(null);
-  const [isLoading, setIsLoading] = useState(false); // Changed to false for development
+interface AuthProviderProps {
+  children: ReactNode;
+}
 
+export function AuthProvider({ children }: AuthProviderProps) {
+  const [address, setAddress] = useState<string | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [zkProof, setZkProof] = useState<any>(null);
+  const [jwtToken, setJwtToken] = useState<string | null>(null);
+  const [userSalt, setUserSalt] = useState<string | null>(null);
+  const [ephemeralPrivateKey, setEphemeralPrivateKey] = useState<string | null>(null);
+  const [maxEpoch, setMaxEpoch] = useState<number | null>(null);
+  const [randomness, setRandomness] = useState<string | null>(null);
+
+  // Check for existing cached authentication on mount
   useEffect(() => {
-    // Comment out zkLogin loading for now
-    // loadSession();
-    
-    // For development, create a mock session
-    const mockSession: SessionData = {
-      userId: 'mock-user-123',
-      deviceId: 'mock-device-456',
-      expiresAt: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
-    };
-    
-    const mockZkSession: ZkLoginSession = {
-      jwt: 'mock-jwt',
-      salt: 'mock-salt',
-      maxEpoch: 1000,
-      randomness: 'mock-randomness',
-      ephemeralKeyPair: {
-        publicKey: 'mock-public-key',
-        privateKey: 'mock-private-key',
-      },
-      userAddress: '0x1234567890abcdef',
-    };
-    
-    setSession(mockSession);
-    setZkLoginSession(mockZkSession);
+    checkAuth();
   }, []);
 
-  /* 
-  // Original zkLogin implementation - commented out for development
-  const loadSession = async () => {
+  const checkAuth = () => {
+    console.log('🔍 Checking authentication status...');
+
     try {
-      const savedSession = localStorage.getItem(STORAGE_KEYS.SESSION_TOKEN);
-      if (savedSession) {
-        const parsedSession: SessionData = JSON.parse(savedSession);
-        // Check if session is expired
-        if (parsedSession.expiresAt > Date.now()) {
-          setSession(parsedSession);
-          // Try to load zkLogin session
-          const zkSession = sessionStorage.getItem('zklogin_session');
-          if (zkSession) {
-            setZkLoginSession(JSON.parse(zkSession));
-          }
-        } else {
-          // Session expired
-          await logout();
+      const isAuth = SessionManager.isAuthenticated();
+      console.log('🔐 SessionManager.isAuthenticated():', isAuth);
+
+      if (isAuth) {
+        const cachedProof = SessionManager.getCachedProof();
+        console.log('📋 Cached proof found');
+
+        if (cachedProof && cachedProof.address) {
+          console.log('✅ User is authenticated');
+          console.log('📍 Address:', cachedProof.address);
+
+          // Restore address from cache
+          setAddress(cachedProof.address);
+
+          // Also restore proof data for transactions
+          if (cachedProof.zkProof) setZkProof(cachedProof.zkProof);
+          if (cachedProof.jwtToken) setJwtToken(cachedProof.jwtToken);
+          if (cachedProof.userSalt) setUserSalt(cachedProof.userSalt);
+          if (cachedProof.ephemeralPrivateKey) setEphemeralPrivateKey(cachedProof.ephemeralPrivateKey);
+          if (cachedProof.maxEpoch) setMaxEpoch(cachedProof.maxEpoch);
+          if (cachedProof.randomness) setRandomness(cachedProof.randomness);
+
+          setIsAuthenticated(true);
+          console.log(`⏰ Session valid for: ${SessionManager.getFormattedTTL()}`);
         }
+      } else {
+        console.log('❌ User is not authenticated');
+        clearAuthState();
       }
     } catch (error) {
-      console.error('Error loading session:', error);
+      console.error('Error checking authentication:', error);
+      setIsAuthenticated(false);
     } finally {
       setIsLoading(false);
     }
   };
-  */
 
-  const login = async (zkSession: ZkLoginSession) => {
-    try {
-      const sessionData: SessionData = {
-        userId: zkSession.userAddress,
-        deviceId: await generateDeviceId(),
-        expiresAt: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
-      };
-
-      setSession(sessionData);
-      setZkLoginSession(zkSession);
-
-      // Save to storage
-      localStorage.setItem('pass_me_session', JSON.stringify(sessionData));
-      sessionStorage.setItem('zklogin_session', JSON.stringify(zkSession));
-
-      // Notify extension
-      if (typeof chrome !== 'undefined' && chrome.runtime) {
-        chrome.runtime.sendMessage({
-          type: 'USER_LOGGED_IN',
-          payload: { userId: zkSession.userAddress },
-        });
-      }
-    } catch (error) {
-      console.error('Error during login:', error);
-      throw error;
-    }
+  const clearAuthState = () => {
+    setAddress(null);
+    setZkProof(null);
+    setJwtToken(null);
+    setUserSalt(null);
+    setEphemeralPrivateKey(null);
+    setMaxEpoch(null);
+    setRandomness(null);
+    setIsAuthenticated(false);
   };
 
-  const logout = async () => {
+  const setAuthData = (data: {
+    address: string;
+    zkProof: any;
+    jwtToken: string;
+    userSalt: string;
+    ephemeralPrivateKey: string;
+    maxEpoch: number;
+    randomness: string;
+  }) => {
+    console.log('💾 Setting auth data in context...');
+    setAddress(data.address);
+    setZkProof(data.zkProof);
+    setJwtToken(data.jwtToken);
+    setUserSalt(data.userSalt);
+    setEphemeralPrivateKey(data.ephemeralPrivateKey);
+    setMaxEpoch(data.maxEpoch);
+    setRandomness(data.randomness);
+    setIsAuthenticated(true);
+    console.log('✅ Auth data set successfully');
+  };
+
+  const logout = () => {
+    console.log('🔓 Logging out...');
     try {
-      setSession(null);
-      setZkLoginSession(null);
-
-      // Clear storage
-      localStorage.removeItem('pass_me_session');
-      sessionStorage.removeItem('zklogin_session');
-      localStorage.removeItem('pass_me_encrypted_vault');
-
-      // Notify extension
-      if (typeof chrome !== 'undefined' && chrome.runtime) {
-        chrome.runtime.sendMessage({
-          type: 'USER_LOGGED_OUT',
-        });
-      }
+      ZkLoginService.clearSession();
+      SessionManager.clearSession();
+      clearAuthState();
+      console.log('✅ Logout successful');
     } catch (error) {
       console.error('Error during logout:', error);
     }
   };
 
-  const refreshSession = async () => {
-    if (!session) return;
-
-    const newExpiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
-    const updatedSession = { ...session, expiresAt: newExpiresAt };
-    setSession(updatedSession);
-    localStorage.setItem('pass_me_session', JSON.stringify(updatedSession));
-  };
-
   const value: AuthContextType = {
-    session,
-    zkLoginSession,
-    isAuthenticated: !!session && !!zkLoginSession,
+    address,
+    isAuthenticated,
     isLoading,
-    login,
+    zkProof,
+    jwtToken,
+    userSalt,
+    ephemeralPrivateKey,
+    maxEpoch,
+    randomness,
     logout,
-    refreshSession,
+    checkAuth,
+    setAuthData,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -175,18 +161,4 @@ export function useAuth() {
   return context;
 }
 
-async function generateDeviceId(): Promise<string> {
-  const components = [
-    navigator.userAgent,
-    navigator.language,
-    new Date().getTimezoneOffset(),
-    screen.width,
-    screen.height,
-  ];
-  const fingerprint = components.join('|');
-  const encoder = new TextEncoder();
-  const data = encoder.encode(fingerprint);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
+export default AuthProvider;
