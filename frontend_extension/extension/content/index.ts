@@ -1,9 +1,6 @@
 // Content Script for Pass.me Extension
 // Injected into all web pages to detect forms and auto-fill passwords
 
-// import type { ExtensionMessage } from '@/types';
-
-// Temporary type for development
 interface ExtensionMessage {
   type: string;
   payload?: any;
@@ -18,16 +15,16 @@ let currentDomain = '';
 // Initialize content script
 function initialize() {
   currentDomain = extractDomain(window.location.href);
-  
+
   // Detect existing forms
   detectLoginForms();
-  
+
   // Watch for new forms (SPA navigation)
   observeDOM();
-  
+
   // Listen for messages from background script
   chrome.runtime.onMessage.addListener(handleMessage);
-  
+
   console.log('Pass.me content script initialized for:', currentDomain);
 }
 
@@ -35,7 +32,7 @@ function initialize() {
 function extractDomain(url: string): string {
   try {
     const hostname = new URL(url).hostname;
-    // Remove www. prefix
+    // Remove www. prefix and normalize
     return hostname.replace(/^www\./, '');
   } catch {
     return '';
@@ -46,14 +43,14 @@ function extractDomain(url: string): string {
 function detectLoginForms() {
   const forms = document.querySelectorAll('form');
   detectedForms = [];
-  
+
   forms.forEach(form => {
     if (isLoginForm(form)) {
       detectedForms.push(form);
       addPassMeButton(form);
     }
   });
-  
+
   if (detectedForms.length > 0) {
     notifyFormsDetected();
   }
@@ -64,13 +61,13 @@ function isLoginForm(form: HTMLFormElement): boolean {
   const inputs = form.querySelectorAll('input');
   let hasEmailOrUsername = false;
   let hasPassword = false;
-  
+
   inputs.forEach(input => {
     const type = input.type.toLowerCase();
     const name = input.name.toLowerCase();
     const id = input.id.toLowerCase();
     const placeholder = input.placeholder.toLowerCase();
-    
+
     // Check for email/username field
     if (
       type === 'email' ||
@@ -84,13 +81,13 @@ function isLoginForm(form: HTMLFormElement): boolean {
     ) {
       hasEmailOrUsername = true;
     }
-    
+
     // Check for password field
     if (type === 'password') {
       hasPassword = true;
     }
   });
-  
+
   return hasEmailOrUsername && hasPassword;
 }
 
@@ -100,10 +97,10 @@ function addPassMeButton(form: HTMLFormElement) {
   if (form.querySelector('.pass-me-fill-btn')) {
     return;
   }
-  
+
   const passwordField = form.querySelector('input[type="password"]') as HTMLInputElement;
   if (!passwordField) return;
-  
+
   // Create Pass.me button
   const button = document.createElement('button');
   button.type = 'button';
@@ -124,19 +121,18 @@ function addPassMeButton(form: HTMLFormElement) {
     z-index: 10000;
     box-shadow: 0 2px 4px rgba(0,0,0,0.2);
   `;
-  
+
   // Position relative to password field
-  const fieldRect = passwordField.getBoundingClientRect();
   passwordField.style.position = 'relative';
   passwordField.style.paddingRight = '80px';
-  
+
   // Add click handler
   button.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
     requestAutoFill(form);
   });
-  
+
   // Insert button
   const container = passwordField.parentElement;
   if (container) {
@@ -149,13 +145,15 @@ function addPassMeButton(form: HTMLFormElement) {
 async function requestAutoFill(form: HTMLFormElement) {
   try {
     const usernameField = findUsernameField(form);
-    
+
     if (!usernameField) {
       showNotification('Username field not found', 'error');
       return;
     }
-    
-    // Send message to background script
+
+    console.log('🔍 Requesting passwords for domain:', currentDomain);
+
+    // Send message to background script with current domain
     const response = await chrome.runtime.sendMessage({
       type: 'REQUEST_AUTO_FILL',
       payload: {
@@ -163,12 +161,17 @@ async function requestAutoFill(form: HTMLFormElement) {
         url: window.location.href,
       },
     });
-    
-    if (response.success && response.data) {
-      fillForm(form, response.data.username, response.data.password);
+
+    console.log('📨 Auto-fill response:', response);
+
+    if (response.success && response.data && response.data.length > 0) {
+      // If multiple entries found, use the first one or show selection
+      const entry = response.data[0];
+      fillForm(form, entry.username, entry.password);
       showNotification('Password filled successfully', 'success');
     } else {
-      showNotification('No password found for this site', 'info');
+      showNotification(`No password found for ${currentDomain}`, 'info');
+      console.log('ℹ️ No passwords found for this domain');
     }
   } catch (error) {
     console.error('Auto-fill error:', error);
@@ -179,12 +182,12 @@ async function requestAutoFill(form: HTMLFormElement) {
 // Find username/email field in form
 function findUsernameField(form: HTMLFormElement): HTMLInputElement | null {
   const inputs = form.querySelectorAll('input');
-  
+
   for (const input of inputs) {
     const type = input.type.toLowerCase();
     const name = input.name.toLowerCase();
     const id = input.id.toLowerCase();
-    
+
     if (
       type === 'email' ||
       type === 'text' ||
@@ -197,7 +200,7 @@ function findUsernameField(form: HTMLFormElement): HTMLInputElement | null {
       return input as HTMLInputElement;
     }
   }
-  
+
   return null;
 }
 
@@ -205,20 +208,22 @@ function findUsernameField(form: HTMLFormElement): HTMLInputElement | null {
 function fillForm(form: HTMLFormElement, username: string, password: string) {
   const usernameField = findUsernameField(form);
   const passwordField = form.querySelector('input[type="password"]') as HTMLInputElement;
-  
+
   if (usernameField && passwordField) {
     // Fill fields
     usernameField.value = username;
     passwordField.value = password;
-    
+
     // Trigger events to notify the page
     usernameField.dispatchEvent(new Event('input', { bubbles: true }));
     usernameField.dispatchEvent(new Event('change', { bubbles: true }));
     passwordField.dispatchEvent(new Event('input', { bubbles: true }));
     passwordField.dispatchEvent(new Event('change', { bubbles: true }));
-    
+
     // Focus password field
     passwordField.focus();
+
+    console.log('✅ Form filled with credentials');
   }
 }
 
@@ -228,6 +233,8 @@ function handleMessage(
   sender: chrome.runtime.MessageSender,
   sendResponse: (response: any) => void
 ) {
+  console.log('📨 Content script received message:', message.type);
+
   switch (message.type) {
     case 'FILL_FORM':
       if (message.payload) {
@@ -240,22 +247,22 @@ function handleMessage(
         }
       }
       break;
-      
+
     case 'INSERT_PASSWORD':
       if (message.payload?.password) {
         insertPasswordAtCursor(message.payload.password);
         sendResponse({ success: true });
       }
       break;
-      
+
     case 'DETECT_FORMS':
       detectLoginForms();
-      sendResponse({ 
-        success: true, 
-        data: { formsCount: detectedForms.length } 
+      sendResponse({
+        success: true,
+        data: { formsCount: detectedForms.length }
       });
       break;
-      
+
     default:
       sendResponse({ success: false, error: 'Unknown message type' });
   }
@@ -264,12 +271,12 @@ function handleMessage(
 // Insert password at cursor position
 function insertPasswordAtCursor(password: string) {
   const activeElement = document.activeElement as HTMLInputElement;
-  
+
   if (activeElement && (activeElement.type === 'password' || activeElement.type === 'text')) {
     activeElement.value = password;
     activeElement.dispatchEvent(new Event('input', { bubbles: true }));
     activeElement.dispatchEvent(new Event('change', { bubbles: true }));
-    
+
     showNotification('Password inserted', 'success');
   }
 }
@@ -278,7 +285,7 @@ function insertPasswordAtCursor(password: string) {
 function observeDOM() {
   const observer = new MutationObserver((mutations) => {
     let shouldRedetect = false;
-    
+
     mutations.forEach((mutation) => {
       if (mutation.type === 'childList') {
         mutation.addedNodes.forEach((node) => {
@@ -291,12 +298,12 @@ function observeDOM() {
         });
       }
     });
-    
+
     if (shouldRedetect) {
       setTimeout(detectLoginForms, 500); // Delay to allow form to fully render
     }
   });
-  
+
   observer.observe(document.body, {
     childList: true,
     subtree: true,
@@ -324,18 +331,18 @@ function showNotification(message: string, type: 'success' | 'error' | 'info') {
   if (existing) {
     existing.remove();
   }
-  
+
   // Create notification
   const notification = document.createElement('div');
   notification.className = 'pass-me-notification';
   notification.textContent = message;
-  
+
   const colors = {
     success: '#22c55e',
     error: '#ef4444',
     info: '#3b82f6',
   };
-  
+
   notification.style.cssText = `
     position: fixed;
     top: 20px;
@@ -350,7 +357,7 @@ function showNotification(message: string, type: 'success' | 'error' | 'info') {
     box-shadow: 0 4px 12px rgba(0,0,0,0.3);
     animation: slideIn 0.3s ease-out;
   `;
-  
+
   // Add animation
   const style = document.createElement('style');
   style.textContent = `
@@ -360,9 +367,9 @@ function showNotification(message: string, type: 'success' | 'error' | 'info') {
     }
   `;
   document.head.appendChild(style);
-  
+
   document.body.appendChild(notification);
-  
+
   // Auto-remove after 3 seconds
   setTimeout(() => {
     notification.remove();
@@ -374,11 +381,11 @@ function showNotification(message: string, type: 'success' | 'error' | 'info') {
 function captureFormSubmissions() {
   document.addEventListener('submit', (event) => {
     const form = event.target as HTMLFormElement;
-    
+
     if (isLoginForm(form)) {
       const usernameField = findUsernameField(form);
       const passwordField = form.querySelector('input[type="password"]') as HTMLInputElement;
-      
+
       if (usernameField && passwordField && usernameField.value && passwordField.value) {
         // Ask user if they want to save this password
         setTimeout(() => {
@@ -439,9 +446,9 @@ function offerToSavePassword(username: string, password: string) {
       </div>
     </div>
   `;
-  
+
   document.body.appendChild(prompt);
-  
+
   // Handle save
   prompt.querySelector('#pass-me-save-yes')?.addEventListener('click', () => {
     chrome.runtime.sendMessage({
@@ -456,12 +463,12 @@ function offerToSavePassword(username: string, password: string) {
     prompt.remove();
     showNotification('Password saved to Pass.me', 'success');
   });
-  
+
   // Handle dismiss
   prompt.querySelector('#pass-me-save-no')?.addEventListener('click', () => {
     prompt.remove();
   });
-  
+
   // Auto-dismiss after 10 seconds
   setTimeout(() => {
     if (document.body.contains(prompt)) {
