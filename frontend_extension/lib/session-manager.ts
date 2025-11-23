@@ -2,8 +2,15 @@
 
 /**
  * SessionManager - Handles zkLogin session persistence with 24h TTL
- * Stores session data, proofs, and JWT tokens for reuse across transactions
+ * Uses chrome.storage for extension, localStorage for web
  */
+
+import {
+  getStorageItem,
+  setStorageItem,
+  removeStorageItem,
+  isExtensionContext,
+} from './extension-storage';
 
 export interface CachedProofData {
   zkProof: any;
@@ -13,12 +20,13 @@ export interface CachedProofData {
   maxEpoch: number;
   randomness: string;
   ephemeralPrivateKey: string;
-  createdAt: number; // timestamp
-  expiresAt: number; // timestamp
+  createdAt: number;
+  expiresAt: number;
 }
 
 export interface SessionData {
   ephemeralPrivateKey: string;
+  ephemeralPublicKey?: string;
   randomness: string;
   maxEpoch: string;
   userSalt: string;
@@ -29,75 +37,95 @@ const SESSION_KEY = "zkLoginSession";
 const PROOF_CACHE_KEY = "zkLoginProofCache";
 const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
 
+// In-memory cache for sync access (populated from async storage)
+let cachedProofData: CachedProofData | null = null;
+let isInitialized = false;
+
 export class SessionManager {
+  /**
+   * Initialize the session manager (load from storage)
+   * Call this on app startup
+   */
+  static async initialize(): Promise<void> {
+    if (isInitialized) return;
+
+    try {
+      const cached = await getStorageItem<CachedProofData>(PROOF_CACHE_KEY);
+      if (cached && cached.expiresAt > Date.now()) {
+        cachedProofData = cached;
+        console.log('✅ Session loaded from storage');
+      } else if (cached) {
+        // Expired, clear it
+        await removeStorageItem(PROOF_CACHE_KEY);
+        cachedProofData = null;
+        console.log('🗑️ Expired session cleared');
+      }
+    } catch (error) {
+      console.error('Error initializing session:', error);
+    }
+    isInitialized = true;
+  }
+
   /**
    * Check if a cached proof is still valid (not expired)
    */
   static isCacheValid(): boolean {
-    if (typeof window === "undefined") return false;
+    if (!cachedProofData) return false;
+    return Date.now() < cachedProofData.expiresAt;
+  }
 
-    const cached = localStorage.getItem(PROOF_CACHE_KEY);
-    if (!cached) return false;
-
-    try {
-      const data: CachedProofData = JSON.parse(cached);
-      const now = Date.now();
-      return now < data.expiresAt;
-    } catch {
-      return false;
-    }
+  /**
+   * Check if a cached proof is still valid (async version)
+   */
+  static async isCacheValidAsync(): Promise<boolean> {
+    await this.initialize();
+    return this.isCacheValid();
   }
 
   /**
    * Get cached proof data if valid
-   * NOTE: Returns partial data (address only) - sensitive fields are in React context
    */
   static getCachedProof(): Partial<CachedProofData> | null {
-    if (typeof window === "undefined") return null;
-
     if (!this.isCacheValid()) {
-      this.clearProofCache();
       return null;
     }
+    return cachedProofData;
+  }
 
-    const cached = localStorage.getItem(PROOF_CACHE_KEY);
-    if (!cached) return null;
-
-    try {
-      const data = JSON.parse(cached);
-      // Return what we have (address and proof) - context has the rest
-      return data as Partial<CachedProofData>;
-    } catch {
-      this.clearProofCache();
-      return null;
-    }
+  /**
+   * Get cached proof data (async version)
+   */
+  static async getCachedProofAsync(): Promise<Partial<CachedProofData> | null> {
+    await this.initialize();
+    return this.getCachedProof();
   }
 
   /**
    * Save proof data to cache with 24h TTL
-   * NOTE: Stores zkProof data including jwtToken, userSalt for transaction signing
-   * This data is required to create zkLogin signatures for transactions
    */
-  static cacheProof(data: Omit<CachedProofData, "createdAt" | "expiresAt">): void {
-    if (typeof window === "undefined") return;
-
+  static async cacheProof(data: Omit<CachedProofData, "createdAt" | "expiresAt">): Promise<void> {
     const now = Date.now();
-    const cacheData = {
+    const cacheData: CachedProofData = {
       ...data,
       createdAt: now,
       expiresAt: now + CACHE_TTL,
     };
 
-    localStorage.setItem(PROOF_CACHE_KEY, JSON.stringify(cacheData));
-    console.log("✅ zkLogin proof cached (valid for 24h) - includes proof data for transactions");
+    // Update in-memory cache
+    cachedProofData = cacheData;
+    isInitialized = true;
+
+    // Persist to storage
+    await setStorageItem(PROOF_CACHE_KEY, cacheData);
+    console.log("✅ zkLogin proof cached (valid for 24h)");
   }
 
   /**
    * Clear cached proof
    */
-  static clearProofCache(): void {
-    if (typeof window === "undefined") return;
-    localStorage.removeItem(PROOF_CACHE_KEY);
+  static async clearProofCache(): Promise<void> {
+    cachedProofData = null;
+    await removeStorageItem(PROOF_CACHE_KEY);
     console.log("🗑️ Proof cache cleared");
   }
 
@@ -105,10 +133,8 @@ export class SessionManager {
    * Get remaining cache TTL in milliseconds
    */
   static getCacheTTL(): number {
-    const cached = this.getCachedProof();
-    if (!cached || !cached.expiresAt) return 0;
-
-    const remaining = cached.expiresAt - Date.now();
+    if (!cachedProofData || !cachedProofData.expiresAt) return 0;
+    const remaining = cachedProofData.expiresAt - Date.now();
     return remaining > 0 ? remaining : 0;
   }
 
@@ -131,34 +157,25 @@ export class SessionManager {
   /**
    * Save session data
    */
-  static saveSession(session: SessionData): void {
-    if (typeof window === "undefined") return;
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  static async saveSession(session: SessionData): Promise<void> {
+    await setStorageItem(SESSION_KEY, session);
   }
 
   /**
    * Load session data
    */
-  static loadSession(): SessionData | null {
-    if (typeof window === "undefined") return null;
-
-    const sessionStr = localStorage.getItem(SESSION_KEY);
-    if (!sessionStr) return null;
-
-    try {
-      return JSON.parse(sessionStr) as SessionData;
-    } catch {
-      return null;
-    }
+  static async loadSession(): Promise<SessionData | null> {
+    return await getStorageItem<SessionData>(SESSION_KEY);
   }
 
   /**
    * Clear session data
    */
-  static clearSession(): void {
-    if (typeof window === "undefined") return;
-    localStorage.removeItem(SESSION_KEY);
-    this.clearProofCache();
+  static async clearSession(): Promise<void> {
+    cachedProofData = null;
+    isInitialized = false;
+    await removeStorageItem(SESSION_KEY);
+    await removeStorageItem(PROOF_CACHE_KEY);
     console.log("🗑️ Session and proof cache cleared");
   }
 
@@ -170,10 +187,26 @@ export class SessionManager {
   }
 
   /**
+   * Check if user is authenticated (async version)
+   */
+  static async isAuthenticatedAsync(): Promise<boolean> {
+    await this.initialize();
+    return this.isAuthenticated();
+  }
+
+  /**
    * Get user's cached address
    */
   static getCachedAddress(): string | null {
     const cached = this.getCachedProof();
     return cached?.address || null;
+  }
+
+  /**
+   * Get user's cached address (async version)
+   */
+  static async getCachedAddressAsync(): Promise<string | null> {
+    await this.initialize();
+    return this.getCachedAddress();
   }
 }

@@ -3,7 +3,6 @@
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import {
   generateNonce,
-  generateRandomness,
   getZkLoginSignature,
   genAddressSeed,
   computeZkLoginAddressFromSeed,
@@ -11,9 +10,19 @@ import {
 } from "@mysten/sui/zklogin";
 import { jwtDecode } from "jwt-decode";
 import { SessionManager } from "./session-manager";
+import { getStorageItem, setStorageItem, removeStorageItem, isExtensionContext } from "./extension-storage";
+
+// Environment variables (injected by webpack)
+const GOOGLE_CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
+const REDIRECT_URL = process.env.NEXT_PUBLIC_REDIRECT_URL || 'http://localhost:3000/callback';
+const OAUTH_URL = process.env.NEXT_PUBLIC_OAUTH_URL || 'https://accounts.google.com/o/oauth2/v2/auth';
+const ENOKI_NONCE_URL = process.env.NEXT_PUBLIC_ENOKI_NONCE_URL || 'https://api.enoki.mystenlabs.com/v1/zklogin/nonce';
+const ENOKI_ZKP_URL = process.env.NEXT_PUBLIC_ENOKI_ZKP_URL || 'https://api.enoki.mystenlabs.com/v1/zklogin/zkp';
+const ENOKI_API_KEY = process.env.NEXT_PUBLIC_ENOKI_API_KEY || '';
 
 export interface ZkLoginSession {
   ephemeralPrivateKey: string;
+  ephemeralPublicKey: string;
   randomness: string;
   maxEpoch: string;
   userSalt: string;
@@ -36,9 +45,10 @@ export interface DecodedJWT {
   exp: number;
 }
 
-export class ZkLoginService {
-  private static STORAGE_KEY = "zkLoginSession";
+const STORAGE_KEY = "zkLoginSession";
+const USER_SALT_KEY = "userSalt";
 
+export class ZkLoginService {
   /**
    * Initialize a new zkLogin session
    * Uses Enoki API for nonce generation on testnet
@@ -56,10 +66,13 @@ export class ZkLoginService {
     const ephemeralKeyPair = new Ed25519Keypair();
 
     // Generate a temporary user salt (will be finalized with JWT email later)
-    let userSalt = localStorage.getItem("userSalt");
+    let userSalt = await getStorageItem<string>(USER_SALT_KEY);
     if (!userSalt) {
-      userSalt = generateRandomness();
-      localStorage.setItem("userSalt", userSalt);
+      // Generate random salt
+      const randomBytes = new Uint8Array(16);
+      crypto.getRandomValues(randomBytes);
+      userSalt = Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+      await setStorageItem(USER_SALT_KEY, userSalt);
     }
 
     // Get serialized public key for Enoki API
@@ -68,21 +81,18 @@ export class ZkLoginService {
       .toSuiPublicKey();
 
     console.log("🌐 Requesting nonce from Enoki API...");
-    const nonceResponse = await fetch(
-      process.env.NEXT_PUBLIC_ENOKI_NONCE_URL!,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.NEXT_PUBLIC_ENOKI_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          network: "testnet",
-          ephemeralPublicKey: ephemeralPublicKeyBase64,
-          additionalEpochs: 2,
-        }),
-      }
-    );
+    const nonceResponse = await fetch(ENOKI_NONCE_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${ENOKI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        network: "testnet",
+        ephemeralPublicKey: ephemeralPublicKeyBase64,
+        additionalEpochs: 2,
+      }),
+    });
 
     if (!nonceResponse.ok) {
       const errorText = await nonceResponse.text();
@@ -102,16 +112,17 @@ export class ZkLoginService {
     // Get the secret key as Bech32 string
     const secretKey = ephemeralKeyPair.getSecretKey();
 
-    // Store session data
+    // Store session data (include public key for background script)
     const sessionData: ZkLoginSession = {
       ephemeralPrivateKey: secretKey,
+      ephemeralPublicKey: ephemeralPublicKeyBase64,
       randomness,
       maxEpoch: maxEpoch.toString(),
       userSalt,
       nonce,
     };
 
-    localStorage.setItem(this.STORAGE_KEY, JSON.stringify(sessionData));
+    await setStorageItem(STORAGE_KEY, sessionData);
     console.log("✅ Session stored successfully");
 
     return {
@@ -128,33 +139,88 @@ export class ZkLoginService {
    */
   static getOAuthUrl(nonce: string): string {
     const params = new URLSearchParams({
-      client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID!,
-      redirect_uri: process.env.NEXT_PUBLIC_REDIRECT_URL!,
+      client_id: GOOGLE_CLIENT_ID,
+      redirect_uri: REDIRECT_URL,
       response_type: "id_token",
       scope: "openid email profile",
       nonce: nonce,
       state: "random_state_" + Date.now(),
     });
 
-    return `${process.env.NEXT_PUBLIC_OAUTH_URL}?${params.toString()}`;
+    return `${OAUTH_URL}?${params.toString()}`;
   }
 
   /**
-   * Load session from localStorage
+   * Launch OAuth flow using chrome.identity (for extensions)
+   * Returns the JWT token directly
    */
-  static loadSession(): ZkLoginSession | null {
-    if (typeof window === "undefined") return null;
-
-    const sessionStr = localStorage.getItem(this.STORAGE_KEY);
-    if (!sessionStr) return null;
-
-    try {
-      const session = JSON.parse(sessionStr);
-      console.log("📦 Session loaded from storage");
-      return session;
-    } catch {
-      return null;
+  static async launchExtensionOAuth(nonce: string): Promise<string> {
+    if (!isExtensionContext() || !chrome.identity) {
+      throw new Error("chrome.identity not available");
     }
+
+    const redirectUrl = chrome.identity.getRedirectURL();
+    console.log("🔐 Extension redirect URL:", redirectUrl);
+
+    const params = new URLSearchParams({
+      client_id: GOOGLE_CLIENT_ID,
+      redirect_uri: redirectUrl,
+      response_type: "id_token",
+      scope: "openid email profile",
+      nonce: nonce,
+      state: "random_state_" + Date.now(),
+    });
+
+    const authUrl = `${OAUTH_URL}?${params.toString()}`;
+    console.log("🌐 Launching OAuth flow...");
+
+    return new Promise((resolve, reject) => {
+      chrome.identity.launchWebAuthFlow(
+        {
+          url: authUrl,
+          interactive: true,
+        },
+        (responseUrl) => {
+          if (chrome.runtime.lastError) {
+            console.error("OAuth error:", chrome.runtime.lastError);
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+
+          if (!responseUrl) {
+            reject(new Error("No response URL from OAuth"));
+            return;
+          }
+
+          console.log("✅ OAuth response received");
+
+          // Extract JWT from URL fragment
+          const url = new URL(responseUrl);
+          const fragment = url.hash;
+          const idTokenMatch = fragment.match(/id_token=([^&]+)/);
+
+          if (!idTokenMatch) {
+            reject(new Error("No id_token in OAuth response"));
+            return;
+          }
+
+          const jwtToken = decodeURIComponent(idTokenMatch[1]);
+          console.log("✅ JWT token extracted");
+          resolve(jwtToken);
+        }
+      );
+    });
+  }
+
+  /**
+   * Load session from storage
+   */
+  static async loadSession(): Promise<ZkLoginSession | null> {
+    const session = await getStorageItem<ZkLoginSession>(STORAGE_KEY);
+    if (session) {
+      console.log("📦 Session loaded from storage");
+    }
+    return session;
   }
 
   /**
@@ -232,10 +298,10 @@ export class ZkLoginService {
     console.log("✅ Nonce verification passed!");
 
     // Call Enoki ZKP service
-    const response = await fetch(process.env.NEXT_PUBLIC_ENOKI_ZKP_URL!, {
+    const response = await fetch(ENOKI_ZKP_URL, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.NEXT_PUBLIC_ENOKI_API_KEY}`,
+        Authorization: `Bearer ${ENOKI_API_KEY}`,
         "Content-Type": "application/json",
         "zklogin-jwt": jwtToken,
       },
@@ -325,11 +391,10 @@ export class ZkLoginService {
   /**
    * Clear session data
    */
-  static clearSession(): void {
-    if (typeof window === "undefined") return;
-    localStorage.removeItem(this.STORAGE_KEY);
-    localStorage.removeItem("userSalt");
-    SessionManager.clearSession();
+  static async clearSession(): Promise<void> {
+    await removeStorageItem(STORAGE_KEY);
+    await removeStorageItem(USER_SALT_KEY);
+    await SessionManager.clearSession();
     console.log("🗑️ zkLogin session cleared");
   }
 
@@ -377,7 +442,7 @@ export class ZkLoginService {
     const userSalt = this.deriveSaltFromJWT(jwtToken);
 
     // Check if user already has cached proof
-    const cachedProof = SessionManager.getCachedProof();
+    const cachedProof = await SessionManager.getCachedProofAsync();
     if (
       cachedProof &&
       cachedProof.userSalt === userSalt &&
@@ -387,11 +452,16 @@ export class ZkLoginService {
       console.log("👤 EXISTING USER - Using cached data");
       console.log("✅ Cached proof valid (" + SessionManager.getFormattedTTL() + ")");
 
+      // Derive ephemeral public key from private key
+      const ephemeralKeyPair = this.recreateKeyPair(cachedProof.ephemeralPrivateKey);
+      const ephemeralPublicKey = ephemeralKeyPair.getPublicKey().toSuiPublicKey();
+
       return {
         address: cachedProof.address!,
         zkProof: cachedProof.zkProof,
         session: {
           ephemeralPrivateKey: cachedProof.ephemeralPrivateKey,
+          ephemeralPublicKey,
           randomness: cachedProof.randomness,
           maxEpoch: (cachedProof.maxEpoch ?? 0).toString(),
           userSalt: cachedProof.userSalt,
@@ -408,21 +478,22 @@ export class ZkLoginService {
     console.log("🆕 NEW USER - Generating fresh proof");
 
     // Load or create session
-    let session = this.loadSession();
+    let session = await this.loadSession();
     if (!session) {
       console.log("📦 Creating new session...");
       const initResult = await this.initializeSession();
       session = {
         ephemeralPrivateKey: initResult.ephemeralKeyPair.getSecretKey(),
+        ephemeralPublicKey: initResult.ephemeralKeyPair.getPublicKey().toSuiPublicKey(),
         randomness: initResult.randomness,
         maxEpoch: initResult.maxEpoch.toString(),
         userSalt: userSalt,
         nonce: initResult.nonce,
       };
-      SessionManager.saveSession(session);
+      await SessionManager.saveSession(session);
     } else {
       session.userSalt = userSalt;
-      SessionManager.saveSession(session);
+      await SessionManager.saveSession(session);
     }
 
     // Recreate ephemeral key pair
@@ -455,7 +526,7 @@ export class ZkLoginService {
     }
 
     // Cache the proof for 24h
-    SessionManager.cacheProof({
+    await SessionManager.cacheProof({
       zkProof,
       jwtToken,
       address,
@@ -479,6 +550,41 @@ export class ZkLoginService {
       ephemeralPrivateKey: session.ephemeralPrivateKey,
       maxEpoch: parseInt(session.maxEpoch),
       randomness: session.randomness,
+    };
+  }
+
+  /**
+   * Full extension login flow
+   * Initializes session, launches OAuth, completes zkLogin
+   */
+  static async loginWithExtension(): Promise<{
+    address: string;
+    zkProof: any;
+    jwtToken: string;
+    userSalt: string;
+    ephemeralPrivateKey: string;
+    maxEpoch: number;
+    randomness: string;
+  }> {
+    console.log("🚀 Starting extension login flow...");
+
+    // Step 1: Initialize session
+    const { nonce } = await this.initializeSession();
+
+    // Step 2: Launch OAuth and get JWT
+    const jwtToken = await this.launchExtensionOAuth(nonce);
+
+    // Step 3: Complete zkLogin flow
+    const result = await this.completeZkLoginFlow(jwtToken);
+
+    return {
+      address: result.address,
+      zkProof: result.zkProof,
+      jwtToken: result.jwtToken,
+      userSalt: result.userSalt,
+      ephemeralPrivateKey: result.ephemeralPrivateKey,
+      maxEpoch: result.maxEpoch,
+      randomness: result.randomness,
     };
   }
 

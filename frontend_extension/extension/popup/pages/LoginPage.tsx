@@ -1,24 +1,63 @@
 import React, { useState, useEffect } from 'react';
 import { ZkLoginService } from '@/lib/zklogin';
 import { SessionManager } from '@/lib/session-manager';
+import { useAuth } from '@/contexts/AuthContext';
+import { isExtensionContext } from '@/lib/extension-storage';
 
 interface Props {
   onLogin: () => void;
 }
 
+// Check if running in a tab (not popup)
+const isRunningInTab = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  // If window dimensions are larger than typical popup, we're in a tab
+  return window.innerWidth > 400 || window.location.search.includes('tab=true');
+};
+
+// Open extension in a new tab
+const openInTab = () => {
+  if (isExtensionContext() && chrome.runtime) {
+    const url = chrome.runtime.getURL('popup/index.html?tab=true');
+    chrome.tabs.create({ url });
+    // Close the popup
+    window.close();
+  }
+};
+
 export default function LoginPage({ onLogin }: Props) {
+  const { setAuthData } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [status, setStatus] = useState<string>('');
   const [isCheckingSession, setIsCheckingSession] = useState(true);
+  const [isInTab, setIsInTab] = useState(false);
+
+  useEffect(() => {
+    setIsInTab(isRunningInTab());
+  }, []);
 
   // Check for existing session on mount
   useEffect(() => {
-    const checkExistingSession = () => {
+    const checkExistingSession = async () => {
       try {
+        await SessionManager.initialize();
         const isAuth = SessionManager.isAuthenticated();
         if (isAuth) {
           console.log('✅ Existing session found, auto-logging in');
-          onLogin();
+          const cached = SessionManager.getCachedProof();
+          if (cached && cached.address) {
+            setAuthData({
+              address: cached.address,
+              zkProof: cached.zkProof,
+              jwtToken: cached.jwtToken!,
+              userSalt: cached.userSalt!,
+              ephemeralPrivateKey: cached.ephemeralPrivateKey!,
+              maxEpoch: cached.maxEpoch!,
+              randomness: cached.randomness!,
+            });
+            onLogin();
+          }
         }
       } catch (err) {
         console.error('Error checking session:', err);
@@ -28,42 +67,81 @@ export default function LoginPage({ onLogin }: Props) {
     };
 
     checkExistingSession();
-  }, [onLogin]);
+  }, [onLogin, setAuthData]);
 
   const handleZkLogin = async () => {
     try {
       setIsLoading(true);
       setError(null);
+      setStatus('Initializing...');
 
-      // Check for existing cached session
-      const cachedProof = SessionManager.getCachedProof();
+      // Check for existing cached session first
+      const cachedProof = await SessionManager.getCachedProofAsync();
       if (cachedProof && cachedProof.address) {
         console.log('✅ Using cached session');
+        setAuthData({
+          address: cachedProof.address,
+          zkProof: cachedProof.zkProof,
+          jwtToken: cachedProof.jwtToken!,
+          userSalt: cachedProof.userSalt!,
+          ephemeralPrivateKey: cachedProof.ephemeralPrivateKey!,
+          maxEpoch: cachedProof.maxEpoch!,
+          randomness: cachedProof.randomness!,
+        });
         onLogin();
         return;
       }
 
-      // Initialize new zkLogin session
-      console.log('🔐 Initializing zkLogin...');
-      const { nonce } = await ZkLoginService.initializeSession();
-      console.log('✅ Session initialized');
+      // Check if we're in extension context
+      if (isExtensionContext() && chrome.identity) {
+        // Use chrome.identity flow for extension
+        console.log('🔐 Using chrome.identity for OAuth...');
+        setStatus('Opening Google login...');
 
-      // Get OAuth URL
-      const loginUrl = ZkLoginService.getOAuthUrl(nonce);
+        const result = await ZkLoginService.loginWithExtension();
 
-      // Open login page in new tab (extensions can't redirect)
-      if (typeof chrome !== 'undefined' && chrome.tabs) {
-        chrome.tabs.create({ url: loginUrl });
+        console.log('✅ zkLogin completed!');
+        console.log('📍 Address:', result.address);
+
+        setAuthData({
+          address: result.address,
+          zkProof: result.zkProof,
+          jwtToken: result.jwtToken,
+          userSalt: result.userSalt,
+          ephemeralPrivateKey: result.ephemeralPrivateKey,
+          maxEpoch: result.maxEpoch,
+          randomness: result.randomness,
+        });
+
+        setStatus('Success!');
+        onLogin();
       } else {
-        // Fallback for development
-        window.open(loginUrl, '_blank');
-      }
+        // Fallback: Open in new tab (for web or when chrome.identity unavailable)
+        console.log('🔐 Initializing zkLogin (web mode)...');
+        setStatus('Preparing login...');
 
-      // Close the popup - user will complete login in browser
-      window.close();
+        const { nonce } = await ZkLoginService.initializeSession();
+        console.log('✅ Session initialized');
+
+        const loginUrl = ZkLoginService.getOAuthUrl(nonce);
+
+        // Open login page in new tab
+        if (typeof chrome !== 'undefined' && chrome.tabs) {
+          chrome.tabs.create({ url: loginUrl });
+        } else {
+          window.open(loginUrl, '_blank');
+        }
+
+        setStatus('Complete login in the new tab...');
+        // Don't close popup - user needs to complete OAuth in tab
+        // After callback processes, user can reopen extension
+      }
     } catch (err) {
       console.error('Login error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to login. Please try again.');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to login. Please try again.';
+      setError(errorMessage);
+      setStatus('');
+    } finally {
       setIsLoading(false);
     }
   };
@@ -84,7 +162,22 @@ export default function LoginPage({ onLogin }: Props) {
   }
 
   return (
-    <div className="login-page">
+    <div className={`login-page ${isInTab ? 'in-tab' : ''}`}>
+      {/* Expand to tab button - only show in popup mode */}
+      {!isInTab && isExtensionContext() && (
+        <button
+          className="expand-btn"
+          onClick={openInTab}
+          title="Open in new tab"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M15 3h6v6"/>
+            <path d="M10 14L21 3"/>
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+          </svg>
+        </button>
+      )}
+
       <div className="login-header">
         <div className="logo">
           <div className="logo-icon">
@@ -134,6 +227,12 @@ export default function LoginPage({ onLogin }: Props) {
           </div>
         )}
 
+        {status && !error && (
+          <div className="status-message">
+            <span>{status}</span>
+          </div>
+        )}
+
         <button
           className="login-btn"
           onClick={handleZkLogin}
@@ -142,7 +241,7 @@ export default function LoginPage({ onLogin }: Props) {
           {isLoading ? (
             <>
               <div className="spinner-small"></div>
-              Connecting...
+              {status || 'Connecting...'}
             </>
           ) : (
             <>

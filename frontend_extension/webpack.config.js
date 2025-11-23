@@ -4,8 +4,8 @@ const HtmlWebpackPlugin = require('html-webpack-plugin');
 const webpack = require('webpack');
 const fs = require('fs');
 
-// Load environment variables from .env file
-const envPath = path.resolve(__dirname, '.env');
+// Load environment variables from .env.local file
+const envPath = path.resolve(__dirname, '.env.local');
 const envVars = {};
 
 if (fs.existsSync(envPath)) {
@@ -24,6 +24,7 @@ module.exports = {
     popup: './extension/popup/popup.tsx',
     background: './extension/background/index.ts',
     content: './extension/content/index.ts',
+    'callback-handler': './extension/content/callback-handler.ts',
   },
   output: {
     path: path.resolve(__dirname, 'dist/extension'),
@@ -78,6 +79,10 @@ module.exports = {
       'process.env.NEXT_PUBLIC_WEBSOCKET_URL': JSON.stringify(envVars.NEXT_PUBLIC_WEBSOCKET_URL || 'ws://localhost:3002'),
       'process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID': JSON.stringify(envVars.NEXT_PUBLIC_GOOGLE_CLIENT_ID || 'your_google_client_id_here'),
       'process.env.NEXT_PUBLIC_REDIRECT_URL': JSON.stringify(envVars.NEXT_PUBLIC_REDIRECT_URL || 'http://localhost:3000/auth/callback'),
+      'process.env.NEXT_PUBLIC_OAUTH_URL': JSON.stringify(envVars.NEXT_PUBLIC_OAUTH_URL || 'https://accounts.google.com/o/oauth2/v2/auth'),
+      'process.env.NEXT_PUBLIC_ENOKI_NONCE_URL': JSON.stringify(envVars.NEXT_PUBLIC_ENOKI_NONCE_URL || 'https://api.enoki.mystenlabs.com/v1/zklogin/nonce'),
+      'process.env.NEXT_PUBLIC_ENOKI_ZKP_URL': JSON.stringify(envVars.NEXT_PUBLIC_ENOKI_ZKP_URL || 'https://api.enoki.mystenlabs.com/v1/zklogin/zkp'),
+      'process.env.NEXT_PUBLIC_ENOKI_API_KEY': JSON.stringify(envVars.NEXT_PUBLIC_ENOKI_API_KEY || 'your_enoki_api_key_here'),
       'process': false,
     }),
     new HtmlWebpackPlugin({
@@ -87,17 +92,21 @@ module.exports = {
     }),
     new CopyPlugin({
       patterns: [
-        { 
-          from: 'extension/manifest.json', 
+        {
+          from: 'extension/manifest.json',
           to: 'manifest.json',
           transform(content) {
-            // Update manifest with correct paths and remove missing CSS
+            // Update manifest with correct paths
             const manifest = JSON.parse(content.toString());
             manifest.action.default_popup = 'popup/index.html';
             manifest.background.service_worker = 'background/index.js';
+            // First content script (main)
             manifest.content_scripts[0].js = ['content/index.js'];
-            // Remove CSS reference since we don't have the file
-            delete manifest.content_scripts[0].css;
+            delete manifest.content_scripts[0].css; // Remove CSS reference
+            // Second content script (callback handler)
+            if (manifest.content_scripts[1]) {
+              manifest.content_scripts[1].js = ['callback-handler/index.js'];
+            }
             // Remove icon references since we don't have the files
             delete manifest.icons;
             delete manifest.action.default_icon;

@@ -1,10 +1,11 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import type { PasswordEntry } from '@/lib/api/client';
 import { hash } from '@/lib/crypto/encryption';
 import { apiClient } from '@/lib/api/client';
 import { uploadToWalrus, downloadFromWalrus } from '@/lib/walrus/client';
+import { useAuth } from './AuthContext';
 
 interface Vault {
   id: string;
@@ -52,41 +53,57 @@ interface VaultContextType {
 
 export const VaultContext = createContext<VaultContextType | undefined>(undefined);
 
-const STORAGE_KEY = 'pass_me_vault_data';
 const MASTER_PASSWORD = 'demo-password-123'; // In production, this should be user's actual password
 
+// Helper to get user-specific storage key
+const getStorageKey = (address: string | null) => {
+  if (!address) return 'pass_me_vault_guest';
+  // Use first 16 chars of address for key (enough to be unique)
+  return `pass_me_vault_${address.slice(0, 18)}`;
+};
+
 export function VaultProvider({ children }: { children: ReactNode }) {
+  const { address, isAuthenticated } = useAuth();
   const [vault, setVault] = useState<Vault | null>(null);
   const [entries, setEntries] = useState<PasswordEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [currentUserAddress, setCurrentUserAddress] = useState<string | null>(null);
 
+  // Re-initialize vault when user changes
   useEffect(() => {
-    initializeVault();
-  }, []);
+    if (address !== currentUserAddress) {
+      console.log('👤 User changed:', { from: currentUserAddress, to: address });
+      setCurrentUserAddress(address);
+      initializeVault(address);
+    }
+  }, [address, currentUserAddress]);
 
   // ✅ CRITICAL FIX: Enhanced saveToLocalStorage with verification
-  const saveToLocalStorage = (updatedVault: Vault) => {
+  const saveToLocalStorage = (updatedVault: Vault, userAddress: string | null = currentUserAddress) => {
     try {
+      const storageKey = getStorageKey(userAddress);
       const dataToStore = {
         vault: updatedVault,
         timestamp: Date.now(),
+        owner: userAddress, // Store owner address for verification
       };
 
       const jsonStr = JSON.stringify(dataToStore);
 
       console.log('💾 Saving to localStorage:', {
-        key: STORAGE_KEY,
+        key: storageKey,
+        owner: userAddress?.slice(0, 10) + '...',
         entriesCount: updatedVault.entries.length,
         dataSize: jsonStr.length,
         entryIds: updatedVault.entries.map(e => e.id),
         entryDomains: updatedVault.entries.map(e => e.domain)
       });
 
-      localStorage.setItem(STORAGE_KEY, jsonStr);
+      localStorage.setItem(storageKey, jsonStr);
 
       // ✅ VERIFY save worked immediately
-      const verification = localStorage.getItem(STORAGE_KEY);
+      const verification = localStorage.getItem(storageKey);
       if (!verification) {
         console.error('⚠️ CRITICAL: localStorage.setItem succeeded but data not found on read!');
         throw new Error('localStorage verification failed');
@@ -120,11 +137,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const createEmptyVault = () => {
-    console.log('🆕 Creating empty vault');
+  const createEmptyVault = (userAddress: string | null) => {
+    console.log('🆕 Creating empty vault for user:', userAddress?.slice(0, 10) + '...');
     const emptyVault: Vault = {
       id: 'vault-' + Date.now(),
-      owner: '0x' + Math.random().toString(16).substr(2, 40),
+      owner: userAddress || '0x' + Math.random().toString(16).substr(2, 40),
       entries: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -133,20 +150,21 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     };
     setVault(emptyVault);
     setEntries([]);
-    saveToLocalStorage(emptyVault);
-    console.log('✅ Empty vault created and saved');
+    saveToLocalStorage(emptyVault, userAddress);
+    console.log('✅ Empty vault created and saved for user');
   };
 
   // ✅ CRITICAL FIX: Enhanced initializeVault with better logging
-  const initializeVault = async () => {
+  const initializeVault = async (userAddress: string | null) => {
     try {
       setIsLoading(true);
       setError(null);
 
-      console.log('🔍 Initializing vault - checking localStorage...');
-      console.log('📦 Storage key:', STORAGE_KEY);
+      const storageKey = getStorageKey(userAddress);
+      console.log('🔍 Initializing vault for user:', userAddress?.slice(0, 10) + '...');
+      console.log('📦 Storage key:', storageKey);
 
-      const storedData = localStorage.getItem(STORAGE_KEY);
+      const storedData = localStorage.getItem(storageKey);
       console.log('📦 localStorage raw data:', storedData ? `Found (${storedData.length} chars)` : 'Empty');
 
       if (storedData) {
@@ -192,21 +210,21 @@ export function VaultProvider({ children }: { children: ReactNode }) {
               isArray: Array.isArray(parsed.vault?.entries)
             });
             console.warn('📄 Full parsed data:', parsed);
-            createEmptyVault();
+            createEmptyVault(userAddress);
           }
         } catch (parseError) {
           console.error('❌ Failed to parse vault data:', parseError);
           console.error('📄 Raw data that failed:', storedData.substring(0, 200) + '...');
-          createEmptyVault();
+          createEmptyVault(userAddress);
         }
       } else {
-        console.log('ℹ️ No vault in localStorage - creating new empty vault');
-        createEmptyVault();
+        console.log('ℹ️ No vault in localStorage - creating new empty vault for user');
+        createEmptyVault(userAddress);
       }
     } catch (err) {
       console.error('❌ Failed to initialize vault:', err);
       setError('Failed to initialize vault');
-      createEmptyVault();
+      createEmptyVault(userAddress);
     } finally {
       setIsLoading(false);
       console.log('✅ Vault initialization complete');
@@ -217,7 +235,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     try {
       setIsLoading(true);
       setError(null);
-      createEmptyVault();
+      createEmptyVault(currentUserAddress);
     } catch (err) {
       console.error('Error creating vault:', err);
       setError('Failed to create vault');
@@ -234,9 +252,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
   const lockVault = async () => {
     try {
+      // Don't delete vault data - just clear from memory
+      // User's vault data stays in localStorage for when they log back in
+      console.log('🔒 Locking vault (keeping data in localStorage for user:', currentUserAddress?.slice(0, 10) + '...)');
       setVault(null);
       setEntries([]);
-      localStorage.removeItem(STORAGE_KEY);
+      // Note: We do NOT remove from localStorage - each user has their own key
     } catch (err) {
       console.error('Error locking vault:', err);
       setError('Failed to lock vault');
@@ -249,7 +270,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       console.log('🔄 Syncing vault to Walrus and Sui...');
 
       // ✅ CRITICAL FIX: Get fresh vault data from localStorage (source of truth)
-      const storedData = localStorage.getItem(STORAGE_KEY);
+      const storageKey = getStorageKey(currentUserAddress);
+      const storedData = localStorage.getItem(storageKey);
       if (!storedData) {
         console.log('⚠️ No vault in localStorage to sync');
         return;

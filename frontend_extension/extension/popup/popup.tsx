@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
-import { VaultProvider, useVault } from '@/contexts/VaultContext';
+import { VaultProvider } from '@/contexts/VaultContext';
 import { ExtensionProvider } from '@/contexts/ExtensionContext';
+import { SessionManager } from '@/lib/session-manager';
 import LoginPage from './pages/LoginPage';
 import VaultPage from './pages/VaultPage';
 import AddPasswordPage from './pages/AddPasswordPage';
@@ -14,9 +15,72 @@ import './popup.css';
 
 type Page = 'login' | 'vault' | 'add' | 'view' | 'generator' | 'settings' | 'alerts';
 
+// Check if running in a tab (not popup)
+const isRunningInTab = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return window.innerWidth > 400 || window.location.search.includes('tab=true');
+};
+
 function PopupApp() {
-  const [currentPage, setCurrentPage] = useState<Page>('vault'); // Start directly on vault page
+  const { isAuthenticated, isLoading, address } = useAuth();
+  const [currentPage, setCurrentPage] = useState<Page>('login');
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [isInTab, setIsInTab] = useState(false);
+
+  // Check if running in tab mode and apply body styles
+  useEffect(() => {
+    const inTab = isRunningInTab();
+    setIsInTab(inTab);
+    if (inTab) {
+      document.body.classList.add('in-tab');
+      document.body.style.width = '100%';
+    }
+  }, []);
+
+  // Check authentication on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        console.log('🔍 Checking authentication...');
+        await SessionManager.initialize();
+        const isAuth = SessionManager.isAuthenticated();
+        console.log('🔐 Is authenticated:', isAuth);
+
+        if (isAuth) {
+          setCurrentPage('vault');
+        } else {
+          setCurrentPage('login');
+        }
+      } catch (error) {
+        console.error('Error checking auth:', error);
+        setCurrentPage('login');
+      } finally {
+        setIsCheckingAuth(false);
+      }
+    };
+
+    checkAuth();
+  }, []);
+
+  // Update page when auth state changes
+  useEffect(() => {
+    if (!isLoading && !isCheckingAuth) {
+      if (isAuthenticated && address) {
+        setCurrentPage('vault');
+      }
+    }
+  }, [isAuthenticated, isLoading, address, isCheckingAuth]);
+
+  const handleLogin = () => {
+    console.log('✅ Login successful, navigating to vault');
+    setCurrentPage('vault');
+  };
+
+  const handleLogout = () => {
+    console.log('🔓 Logging out...');
+    setCurrentPage('login');
+  };
 
   const handleViewPassword = (entryId: string) => {
     setSelectedEntryId(entryId);
@@ -28,12 +92,28 @@ function PopupApp() {
     setSelectedEntryId(null);
   };
 
-  // Remove loading states - just show the vault directly
+  // Show loading while checking auth
+  if (isCheckingAuth || isLoading) {
+    return (
+      <div className="popup-container">
+        <div className="loading-screen">
+          <div className="logo">
+            <div className="logo-icon">
+              <div className="spinner-small"></div>
+            </div>
+          </div>
+          <p className="tagline">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="popup-container">
-      {/* Removed login page - go directly to vault */}
-      
+    <div className={`popup-container ${isInTab ? 'in-tab' : ''}`}>
+      {currentPage === 'login' && (
+        <LoginPage onLogin={handleLogin} />
+      )}
+
       {currentPage === 'vault' && (
         <VaultPage
           onAddPassword={() => setCurrentPage('add')}
@@ -41,13 +121,14 @@ function PopupApp() {
           onGeneratePassword={() => setCurrentPage('generator')}
           onSettings={() => setCurrentPage('settings')}
           onAlerts={() => setCurrentPage('alerts')}
+          onLogout={handleLogout}
         />
       )}
-      
+
       {currentPage === 'add' && (
         <AddPasswordPage onBack={handleBack} onSave={handleBack} />
       )}
-      
+
       {currentPage === 'view' && selectedEntryId && (
         <ViewPasswordPage
           entryId={selectedEntryId}
@@ -55,15 +136,15 @@ function PopupApp() {
           onDelete={handleBack}
         />
       )}
-      
+
       {currentPage === 'generator' && (
         <GeneratorPage onBack={handleBack} />
       )}
-      
+
       {currentPage === 'settings' && (
-        <SettingsPage onBack={handleBack} />
+        <SettingsPage onBack={handleBack} onLogout={handleLogout} />
       )}
-      
+
       {currentPage === 'alerts' && (
         <AlertsPage onBack={handleBack} />
       )}
@@ -111,7 +192,7 @@ if (container) {
   fallbackContainer.id = 'root';
   fallbackContainer.style.cssText = 'width: 375px; min-height: 500px; background: #f5f5f5;';
   document.body.appendChild(fallbackContainer);
-  
+
   const root = createRoot(fallbackContainer);
   root.render(<App />);
 }

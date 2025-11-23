@@ -2,6 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { useVault } from '@/contexts/VaultContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useExtension } from '@/contexts/ExtensionContext';
+import { isExtensionContext } from '@/lib/extension-storage';
+
+// Check if running in a tab (not popup)
+const isRunningInTab = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return window.innerWidth > 400 || window.location.search.includes('tab=true');
+};
+
+// Open extension in a new tab
+const openInTab = () => {
+  if (isExtensionContext() && chrome.runtime) {
+    const url = chrome.runtime.getURL('popup/index.html?tab=true');
+    chrome.tabs.create({ url });
+    window.close();
+  }
+};
 
 interface Props {
   onAddPassword: () => void;
@@ -9,6 +25,7 @@ interface Props {
   onGeneratePassword: () => void;
   onSettings: () => void;
   onAlerts: () => void;
+  onLogout?: () => void;
 }
 
 export default function VaultPage({
@@ -17,12 +34,18 @@ export default function VaultPage({
   onGeneratePassword,
   onSettings,
   onAlerts,
+  onLogout,
 }: Props) {
   const { entries, searchEntries, lockVault, vault, createVault, isLoading } = useVault();
   const { logout } = useAuth();
   const { alerts } = useExtension();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [isInTab, setIsInTab] = useState(false);
+
+  useEffect(() => {
+    setIsInTab(isRunningInTab());
+  }, []);
 
   const categories = ['All', 'Social Media', 'Banking', 'Email', 'Shopping', 'Entertainment', 'Work', 'Education', 'Other'];
 
@@ -56,6 +79,9 @@ export default function VaultPage({
     try {
       await lockVault();
       await logout();
+      if (onLogout) {
+        onLogout();
+      }
     } catch (error) {
       console.error('Error locking vault:', error);
     }
@@ -92,8 +118,21 @@ export default function VaultPage({
           <span className="entry-count">{entries.length} passwords</span>
         </div>
         <div className="header-actions">
-          <button 
-            onClick={onAlerts} 
+          {!isInTab && isExtensionContext() && (
+            <button
+              onClick={openInTab}
+              className="icon-btn"
+              title="Open in new tab"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M15 3h6v6"/>
+                <path d="M10 14L21 3"/>
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+              </svg>
+            </button>
+          )}
+          <button
+            onClick={onAlerts}
             className={`icon-btn ${unreadAlerts > 0 ? 'has-alerts' : ''}`}
           >
             🔔

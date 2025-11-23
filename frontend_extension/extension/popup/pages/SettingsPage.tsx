@@ -5,10 +5,11 @@ import { useExtension } from '@/contexts/ExtensionContext';
 
 interface Props {
   onBack: () => void;
+  onLogout?: () => void;
 }
 
-export default function SettingsPage({ onBack }: Props) {
-  const { logout } = useAuth();
+export default function SettingsPage({ onBack, onLogout }: Props) {
+  const { logout, address } = useAuth();
   const { getVaultInfo, vault } = useVault();
   const { autoLockTimeout, setAutoLockTimeout } = useExtension();
   
@@ -78,6 +79,9 @@ export default function SettingsPage({ onBack }: Props) {
   const handleLogout = async () => {
     if (confirm('Are you sure you want to logout? This will lock your vault.')) {
       await logout();
+      if (onLogout) {
+        onLogout();
+      }
     }
   };
 
@@ -107,6 +111,48 @@ export default function SettingsPage({ onBack }: Props) {
       </div>
 
       <div className="settings-content">
+        {/* zkLogin Account Info */}
+        <div className="settings-section account-section">
+          <h3>Your zkLogin Account</h3>
+          <div className="account-card">
+            <div className="account-avatar">
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+            </div>
+            <div className="account-details">
+              <div className="account-label">Sui Address</div>
+              <div
+                className="account-address"
+                onClick={() => {
+                  if (address) {
+                    navigator.clipboard.writeText(address);
+                    alert('Address copied to clipboard!');
+                  }
+                }}
+                title="Click to copy"
+              >
+                {address
+                  ? `${address.slice(0, 10)}...${address.slice(-8)}`
+                  : 'Not connected'
+                }
+              </div>
+              <div className="account-network">Sui Testnet</div>
+            </div>
+          </div>
+          {address && (
+            <a
+              href={`https://suiscan.xyz/testnet/account/${address}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="view-explorer-btn"
+            >
+              View on Explorer
+            </a>
+          )}
+        </div>
+
         {/* Vault Information */}
         <div className="settings-section">
           <h3>Vault Information</h3>
@@ -118,7 +164,7 @@ export default function SettingsPage({ onBack }: Props) {
             <div className="info-item">
               <label>Last Updated</label>
               <span>
-                {vaultInfo?.lastUpdated 
+                {vaultInfo?.lastUpdated
                   ? new Date(vaultInfo.lastUpdated).toLocaleDateString()
                   : 'Never'
                 }

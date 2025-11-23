@@ -15,8 +15,9 @@ export interface AuthContextType {
   ephemeralPrivateKey: string | null;
   maxEpoch: number | null;
   randomness: string | null;
-  logout: () => void;
-  checkAuth: () => void;
+  userEmail: string | null;
+  logout: () => Promise<void>;
+  checkAuth: () => Promise<void>;
   setAuthData: (data: {
     address: string;
     zkProof: any;
@@ -44,16 +45,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [ephemeralPrivateKey, setEphemeralPrivateKey] = useState<string | null>(null);
   const [maxEpoch, setMaxEpoch] = useState<number | null>(null);
   const [randomness, setRandomness] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   // Check for existing cached authentication on mount
   useEffect(() => {
     checkAuth();
   }, []);
 
-  const checkAuth = () => {
+  const checkAuth = async () => {
     console.log('🔍 Checking authentication status...');
+    setIsLoading(true);
 
     try {
+      // Initialize session manager (loads from chrome.storage)
+      await SessionManager.initialize();
+
       const isAuth = SessionManager.isAuthenticated();
       console.log('🔐 SessionManager.isAuthenticated():', isAuth);
 
@@ -70,7 +76,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
           // Also restore proof data for transactions
           if (cachedProof.zkProof) setZkProof(cachedProof.zkProof);
-          if (cachedProof.jwtToken) setJwtToken(cachedProof.jwtToken);
+          if (cachedProof.jwtToken) {
+            setJwtToken(cachedProof.jwtToken);
+            // Extract email from JWT
+            try {
+              const decoded = ZkLoginService.decodeJWT(cachedProof.jwtToken);
+              setUserEmail(decoded.email);
+            } catch (e) {
+              console.error('Error decoding JWT:', e);
+            }
+          }
           if (cachedProof.userSalt) setUserSalt(cachedProof.userSalt);
           if (cachedProof.ephemeralPrivateKey) setEphemeralPrivateKey(cachedProof.ephemeralPrivateKey);
           if (cachedProof.maxEpoch) setMaxEpoch(cachedProof.maxEpoch);
@@ -99,6 +114,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setEphemeralPrivateKey(null);
     setMaxEpoch(null);
     setRandomness(null);
+    setUserEmail(null);
     setIsAuthenticated(false);
   };
 
@@ -120,14 +136,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setMaxEpoch(data.maxEpoch);
     setRandomness(data.randomness);
     setIsAuthenticated(true);
+
+    // Extract email from JWT
+    try {
+      const decoded = ZkLoginService.decodeJWT(data.jwtToken);
+      setUserEmail(decoded.email);
+    } catch (e) {
+      console.error('Error decoding JWT:', e);
+    }
+
     console.log('✅ Auth data set successfully');
   };
 
-  const logout = () => {
+  const logout = async () => {
     console.log('🔓 Logging out...');
     try {
-      ZkLoginService.clearSession();
-      SessionManager.clearSession();
+      await ZkLoginService.clearSession();
+      await SessionManager.clearSession();
       clearAuthState();
       console.log('✅ Logout successful');
     } catch (error) {
@@ -145,6 +170,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     ephemeralPrivateKey,
     maxEpoch,
     randomness,
+    userEmail,
     logout,
     checkAuth,
     setAuthData,

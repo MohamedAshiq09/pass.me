@@ -27,6 +27,12 @@
       "css": ["content/styles.css"],
       "run_at": "document_idle",
       "all_frames": false
+    },
+    {
+      "matches": ["http://localhost:3000/callback*", "http://localhost:3000/callback/*"],
+      "js": ["content/callback-handler.js"],
+      "run_at": "document_start",
+      "all_frames": false
     }
   ],
   "permissions": [
@@ -34,15 +40,22 @@
     "activeTab",
     "alarms",
     "notifications",
-    "contextMenus"
+    "contextMenus",
+    "identity"
   ],
   "host_permissions": [
     "https://fullnode.testnet.sui.io/*",
     "https://aggregator.walrus-testnet.walrus.space/*",
     "https://publisher.walrus-testnet.walrus.space/*",
+    "https://api.enoki.mystenlabs.com/*",
+    "https://accounts.google.com/*",
     "http://localhost:3001/*",
     "http://localhost:3000/*"
   ],
+  "oauth2": {
+    "client_id": "813263240218-srprog0t7485plr07i4sh0qoeec5evns.apps.googleusercontent.com",
+    "scopes": ["openid", "email", "profile"]
+  },
   "web_accessible_resources": [
     {
       "resources": ["assets/*", "popup/*"],
