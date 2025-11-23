@@ -2,6 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { useVault } from '@/contexts/VaultContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useExtension } from '@/contexts/ExtensionContext';
+import { AuroraBackground } from '@/components/AuroraBackground';
+import {
+  Search,
+  Bell,
+  Settings,
+  Lock,
+  Plus,
+  Zap,
+  X
+} from 'lucide-react';
 
 interface Props {
   onAddPassword: () => void;
@@ -27,7 +37,6 @@ export default function VaultPage({
   const categories = ['All', 'Social Media', 'Banking', 'Email', 'Shopping', 'Entertainment', 'Work', 'Education', 'Other'];
 
   useEffect(() => {
-    // If no vault exists, create one
     if (!vault && !isLoading) {
       createVault().catch(console.error);
     }
@@ -36,12 +45,10 @@ export default function VaultPage({
   const getDisplayEntries = () => {
     let filtered = entries;
 
-    // Filter by search query
     if (searchQuery) {
       filtered = searchEntries(searchQuery);
     }
 
-    // Filter by category
     if (selectedCategory !== 'All') {
       filtered = filtered.filter(entry => entry.category === selectedCategory);
     }
@@ -61,19 +68,21 @@ export default function VaultPage({
     }
   };
 
-  const getCategoryIcon = (category: string) => {
-    const icons: Record<string, string> = {
-      'Social Media': '📱',
-      'Banking': '🏦',
-      'Email': '📧',
-      'Shopping': '🛒',
-      'Entertainment': '🎬',
-      'Work': '💼',
-      'Education': '🎓',
-      'Other': '🌐',
+  const getCategoryCounts = () => {
+    const counts: Record<string, number> = {
+      'All': entries.length,
     };
-    return icons[category] || '🌐';
+
+    categories.forEach(cat => {
+      if (cat !== 'All') {
+        counts[cat] = entries.filter(e => e.category === cat).length;
+      }
+    });
+
+    return counts;
   };
+
+  const categoryCounts = getCategoryCounts();
 
   if (isLoading) {
     return (
@@ -86,124 +95,140 @@ export default function VaultPage({
 
   return (
     <div className="vault-page">
-      <div className="vault-header">
-        <div className="header-left">
-          <h1>🔐 Pass.me</h1>
-          <span className="entry-count">{entries.length} passwords</span>
+      {/* Aurora Background - Only for vault content, not header */}
+      <AuroraBackground showRadialGradient={true}>
+        {/* Header - No Background */}
+        <div className="vault-header">
+          <div className="header-content">
+            <div className="header-title">
+              <h1>Pass.me</h1>
+            </div>
+            <div className="header-actions">
+              <button
+                onClick={onAlerts}
+                className={`icon-btn ${unreadAlerts > 0 ? 'has-alerts' : ''}`}
+                title="Alerts"
+              >
+                <Bell size={18} strokeWidth={2} />
+                {unreadAlerts > 0 && <span className="alert-badge">{unreadAlerts}</span>}
+              </button>
+              <button onClick={onSettings} className="icon-btn" title="Settings">
+                <Settings size={18} strokeWidth={2} />
+              </button>
+              <button onClick={handleLock} className="icon-btn" title="Lock Vault">
+                <Lock size={18} strokeWidth={2} />
+              </button>
+            </div>
+          </div>
         </div>
-        <div className="header-actions">
-          <button
-            onClick={onAlerts}
-            className={`icon-btn ${unreadAlerts > 0 ? 'has-alerts' : ''}`}
-          >
-            🔔
-            {unreadAlerts > 0 && <span className="alert-badge">{unreadAlerts}</span>}
-          </button>
-          <button onClick={onSettings} className="icon-btn">⚙️</button>
-          <button onClick={handleLock} className="icon-btn">🔒</button>
-        </div>
-      </div>
 
-      <div className="search-section">
-        <div className="search-bar">
-          <span className="search-icon">🔍</span>
-          <input
-            type="text"
-            placeholder="Search passwords..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-          {searchQuery && (
-            <button
-              className="clear-search"
-              onClick={() => setSearchQuery('')}
+        {/* Search Section */}
+        <div className="search-section">
+          <div className="search-bar">
+            <Search className="search-icon" size={16} strokeWidth={2} />
+            <input
+              type="text"
+              placeholder="Search passwords..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button
+                className="clear-search"
+                onClick={() => setSearchQuery('')}
+              >
+                <X size={16} strokeWidth={2} />
+              </button>
+            )}
+          </div>
+
+          {/* Category Filter with Counts */}
+          <div className="category-filter">
+            <select
+              value={selectedCategory}
+              onChange={(e) => setSelectedCategory(e.target.value)}
             >
-              ✕
-            </button>
+              {categories.map(category => (
+                <option key={category} value={category}>
+                  {category === 'All' ? `All Categories (${categoryCounts[category]})` : `${category} (${categoryCounts[category] || 0})`}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Password List */}
+        <div className="password-list">
+          {displayEntries.length === 0 ? (
+            <div className="empty-state">
+              {entries.length === 0 ? (
+                <>
+                  <div className="empty-icon">
+                    <Lock size={48} strokeWidth={1.5} />
+                  </div>
+                  <h3>No passwords yet</h3>
+                  <p>Add your first password to get started</p>
+                  <button className="primary-btn" onClick={onAddPassword}>
+                    <Plus size={18} strokeWidth={2} />
+                    Add Password
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="empty-icon">
+                    <Search size={48} strokeWidth={1.5} />
+                  </div>
+                  <h3>No matches found</h3>
+                  <p>Try adjusting your search or filter</p>
+                </>
+              )}
+            </div>
+          ) : (
+            displayEntries.map((entry) => (
+              <div
+                key={entry.id}
+                className="password-card"
+                onClick={() => onViewPassword(entry.id)}
+              >
+                <div className="card-info">
+                  <h3>{entry.domain}</h3>
+                  <p>{entry.username}</p>
+                  <div className="card-meta">
+                    <span className="category">{entry.category}</span>
+                    {entry.lastUsed && (
+                      <span className="last-used">
+                        Used {new Date(entry.lastUsed).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="card-actions">
+                  {entry.favorite && <span className="favorite">★</span>}
+                  <span className="usage-count">{entry.usageCount}</span>
+                </div>
+              </div>
+            ))
           )}
         </div>
 
-        <div className="category-filter">
-          <select
-            value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
+        {/* FAB Container */}
+        <div className="fab-container">
+          <button
+            className="fab-secondary"
+            onClick={onGeneratePassword}
+            title="Generate Password"
           >
-            {categories.map(category => (
-              <option key={category} value={category}>
-                {category === 'All' ? 'All Categories' : category}
-              </option>
-            ))}
-          </select>
+            <Zap size={20} strokeWidth={2} />
+          </button>
+          <button
+            className="fab"
+            onClick={onAddPassword}
+            title="Add Password"
+          >
+            <Plus size={24} strokeWidth={2.5} />
+          </button>
         </div>
-      </div>
-
-      <div className="password-list">
-        {displayEntries.length === 0 ? (
-          <div className="empty-state">
-            {entries.length === 0 ? (
-              <>
-                <div className="empty-icon">🔑</div>
-                <h3>No passwords yet</h3>
-                <p>Add your first password to get started</p>
-                <button className="primary-btn" onClick={onAddPassword}>
-                  Add Password
-                </button>
-              </>
-            ) : (
-              <>
-                <div className="empty-icon">🔍</div>
-                <h3>No matches found</h3>
-                <p>Try adjusting your search or filter</p>
-              </>
-            )}
-          </div>
-        ) : (
-          displayEntries.map((entry) => (
-            <div
-              key={entry.id}
-              className="password-card"
-              onClick={() => onViewPassword(entry.id)}
-            >
-              <div className="card-icon">
-                {getCategoryIcon(entry.category)}
-              </div>
-              <div className="card-info">
-                <h3>{entry.domain}</h3>
-                <p>{entry.username}</p>
-                <div className="card-meta">
-                  <span className="category">{entry.category}</span>
-                  {entry.lastUsed && (
-                    <span className="last-used">
-                      Used {new Date(entry.lastUsed).toLocaleDateString()}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="card-actions">
-                {entry.favorite && <span className="favorite">⭐</span>}
-                <span className="usage-count">{entry.usageCount}</span>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      <div className="fab-container">
-        <button
-          className="fab-secondary"
-          onClick={onGeneratePassword}
-          title="Generate Password"
-        >
-          🎲
-        </button>
-        <button
-          className="fab"
-          onClick={onAddPassword}
-          title="Add Password"
-        >
-          +
-        </button>
-      </div>
+      </AuroraBackground>
     </div>
   );
 }

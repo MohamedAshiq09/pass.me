@@ -3,6 +3,7 @@ import { useVault } from '@/contexts/VaultContext';
 import { generateRandomPassword } from '@/lib/crypto/passwordGenerator';
 import { hash } from '@/lib/crypto/encryption';
 import { PASSWORD_CATEGORIES } from '@/config/constants';
+import { ArrowLeft, Zap } from 'lucide-react';
 
 interface Props {
   onBack: () => void;
@@ -39,8 +40,8 @@ export default function AddPasswordPage({ onBack, onSave }: Props) {
       await addEntry({
         domain,
         username,
-        password, // Store the actual password
-        passwordHash, // Store the hash for breach detection
+        password,
+        passwordHash,
         category,
         notes,
         favorite: false,
@@ -58,7 +59,9 @@ export default function AddPasswordPage({ onBack, onSave }: Props) {
   return (
     <div className="add-password-page">
       <div className="page-header">
-        <button onClick={onBack} className="back-btn">←</button>
+        <button onClick={onBack} className="back-btn">
+          <ArrowLeft size={20} strokeWidth={2} />
+        </button>
         <h2>Add Password</h2>
       </div>
 
@@ -92,8 +95,8 @@ export default function AddPasswordPage({ onBack, onSave }: Props) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
-            <button onClick={handleGenerate} disabled={isGenerating}>
-              {isGenerating ? '...' : '🎲'}
+            <button onClick={handleGenerate} disabled={isGenerating} title="Generate Password">
+              <Zap size={16} strokeWidth={2} />
             </button>
           </div>
         </div>
