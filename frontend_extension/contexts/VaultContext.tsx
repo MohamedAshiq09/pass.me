@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import type { PasswordEntry } from '@/lib/api/client';
+import type { PasswordEntry, VaultData } from '@/lib/api/client';
 import { hash } from '@/lib/crypto/encryption';
 import { apiClient } from '@/lib/api/client';
 import { uploadToWalrus, downloadFromWalrus } from '@/lib/walrus/client';
@@ -60,6 +60,12 @@ const getStorageKey = (address: string | null) => {
   if (!address) return 'pass_me_vault_guest';
   // Use first 16 chars of address for key (enough to be unique)
   return `pass_me_vault_${address.slice(0, 18)}`;
+};
+
+// Helper to get blob ID storage key
+const getBlobIdKey = (address: string | null) => {
+  if (!address) return 'pass_me_blobid_guest';
+  return `pass_me_blobid_${address.slice(0, 18)}`;
 };
 
 export function VaultProvider({ children }: { children: ReactNode }) {
@@ -154,6 +160,74 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     console.log('✅ Empty vault created and saved for user');
   };
 
+  // 🔄 Restore vault from Walrus (for cross-device sync)
+  const restoreFromWalrus = async (userAddress: string): Promise<boolean> => {
+    try {
+      console.log('🔍 Checking for existing vault on Walrus for:', userAddress.slice(0, 10) + '...');
+
+      // First check if we have a cached blobId
+      const blobIdKey = getBlobIdKey(userAddress);
+      let blobId = localStorage.getItem(blobIdKey);
+
+      // If no cached blobId, try to get it from the backend/blockchain
+      if (!blobId) {
+        console.log('📡 Querying backend for vault info...');
+        try {
+          const response = await apiClient.getVaultsByOwner(userAddress);
+          if (response.success && response.data && response.data.length > 0) {
+            // Get the most recent vault
+            const vaultInfo = response.data[0];
+            blobId = vaultInfo.walrus_blob_id || vaultInfo.walrusBlobId;
+            console.log('📦 Found vault on blockchain, blobId:', blobId);
+          }
+        } catch (err) {
+          console.log('⚠️ Could not query backend (might be offline):', err);
+        }
+      }
+
+      if (!blobId) {
+        console.log('ℹ️ No existing vault found on Walrus for this user');
+        return false;
+      }
+
+      console.log('📥 Downloading vault from Walrus, blobId:', blobId);
+      const vaultData: VaultData = await downloadFromWalrus(blobId, MASTER_PASSWORD);
+
+      if (vaultData && vaultData.entries && vaultData.entries.length > 0) {
+        console.log('✅ Downloaded vault with', vaultData.entries.length, 'entries');
+
+        // Create vault object from downloaded data
+        const restoredVault: Vault = {
+          id: 'vault-restored-' + Date.now(),
+          owner: userAddress,
+          entries: vaultData.entries,
+          createdAt: vaultData.metadata?.lastModified || Date.now(),
+          updatedAt: Date.now(),
+          totalEntries: vaultData.entries.length,
+          isLocked: false,
+          walrusBlobId: blobId,
+        };
+
+        // Save to local storage
+        setVault(restoredVault);
+        setEntries(vaultData.entries);
+        saveToLocalStorage(restoredVault, userAddress);
+
+        // Cache the blobId for future use
+        localStorage.setItem(blobIdKey, blobId);
+
+        console.log('🎉 Vault restored from Walrus successfully!');
+        return true;
+      } else {
+        console.log('⚠️ Downloaded vault is empty');
+        return false;
+      }
+    } catch (err) {
+      console.error('❌ Failed to restore from Walrus:', err);
+      return false;
+    }
+  };
+
   // ✅ CRITICAL FIX: Enhanced initializeVault with better logging
   const initializeVault = async (userAddress: string | null) => {
     try {
@@ -218,7 +292,19 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           createEmptyVault(userAddress);
         }
       } else {
-        console.log('ℹ️ No vault in localStorage - creating new empty vault for user');
+        console.log('ℹ️ No vault in localStorage for user');
+
+        // 🔄 Try to restore from Walrus (cross-device sync!)
+        if (userAddress) {
+          console.log('🔄 Attempting to restore from Walrus...');
+          const restored = await restoreFromWalrus(userAddress);
+          if (restored) {
+            console.log('🎉 Vault restored from Walrus - cross-device sync successful!');
+            return; // Vault loaded from Walrus, no need to create empty
+          }
+        }
+
+        console.log('🆕 Creating new empty vault for user');
         createEmptyVault(userAddress);
       }
     } catch (err) {
@@ -330,6 +416,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
         // Save to localStorage
         saveToLocalStorage(updatedVault);
+
+        // 🔄 Save blobId for cross-device sync
+        if (currentUserAddress) {
+          const blobIdKey = getBlobIdKey(currentUserAddress);
+          localStorage.setItem(blobIdKey, blobId);
+          console.log('💾 Saved blobId for cross-device sync:', blobId.slice(0, 20) + '...');
+        }
 
         console.log('✅ Sync complete -', updatedVault.entries.length, 'entries preserved');
       } else {
