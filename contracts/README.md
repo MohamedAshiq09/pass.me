@@ -1,194 +1,134 @@
-# Pass.me Smart Contracts
+# Pass.me Backend
 
-Decentralized password manager contracts built on Sui blockchain.
+Decentralized password manager backend service bridging browser extension, Sui blockchain, and Walrus storage.
 
-## 🏗️ Architecture
+## Purpose
 
-### Core Contracts
+The backend serves three critical functions that can't be handled client-side:
 
-1. **vault.move** - Main vault container for user's password data
-2. **password_entry.move** - Metadata tracking for each password
-3. **alert_system.move** - Real-time security alerts and monitoring
-4. **access_control.move** - Device whitelist and access management
-5. **recovery.move** - Multi-sig recovery system for lost keys
-6. **zklogin_integration.move** - Google/Apple login integration
+1. **Walrus Storage Proxy** - Direct browser uploads fail due to ~2200 HTTP requests per blob; backend handles chunked uploads
+2. **Real-time Alert System** - WebSocket server delivers instant breach notifications from Sui blockchain events
+3. **Event Monitoring** - Polls Sui blockchain for password usage events and triggers anomaly detection
 
-## 🚀 Quick Start
+## Architecture
 
-### Prerequisites
+**Core Components:**
+- Express.js REST API with WebSocket support
+- Sui blockchain event listener (polls every 5s)
+- Walrus storage client (testnet endpoints)
+- Anomaly detection engine for suspicious login patterns
+- In-memory storage (replace with database for production)
 
+**Data Flow:**
+```
+Extension → Backend API → Walrus Storage → Sui Smart Contract
+                ↓
+        WebSocket Alerts ← Sui Events ← Blockchain Monitor
+```
+
+## How It Works
+
+1. **Vault Storage**: Extension encrypts vault → Backend uploads to Walrus → Returns blob ID → Extension stores in Sui contract
+2. **Real-time Alerts**: Sui emits events → Backend polls every 5s → Analyzes anomalies → Sends WebSocket notification → Extension displays alert
+3. **Security**: All vault data arrives pre-encrypted from extension; backend only handles transport
+
+## Setup
 ```bash
-# Install Sui CLI
-curl -fLJO https://github.com/MystenLabs/sui/releases/download/testnet-v1.14.0/sui-testnet-v1.14.0-ubuntu-x86_64.tgz
-tar -xf sui-testnet-v1.14.0-ubuntu-x86_64.tgz
-sudo mv sui-testnet-v1.14.0-ubuntu-x86_64/sui /usr/local/bin/
-
-# Verify installation
-sui --version
+npm install
+cp .env.example .env
+# Edit .env with your Sui package ID
+npm start  # Production
+npm run dev  # Development with hot reload
 ```
 
-### Setup Wallet
-
+**Required Environment Variables:**
 ```bash
-# Create new wallet
-sui client new-address ed25519
-
-# Switch to testnet
-sui client switch --env testnet
-
-# Get testnet tokens
-curl --location --request POST 'https://faucet.testnet.sui.io/gas' \
---header 'Content-Type: application/json' \
---data-raw '{"FixedAmountRequest": {"recipient": "YOUR_SUI_ADDRESS_HERE"}}'
-
-# Check balance
-sui client gas
-```
-
-### Build & Deploy
-
-```bash
-# Build contracts
-cd contracts
-sui move build
-
-# Run tests
-sui move test
-
-# Deploy to testnet
-sui client publish --gas-budget 100000000
-
-# Save the package ID from output!
-```
-
-## 📋 Contract Responsibilities
-
-### 🔐 Vault Contract
-- Creates vault object for each user
-- Stores Walrus blob ID (encrypted data)
-- Tracks total password entries
-- Emergency lock/unlock functionality
-- zkLogin integration
-
-### 🔑 Password Entry Contract
-- Tracks metadata for each website/domain
-- Stores domain hash (privacy-preserving)
-- Maintains device whitelist
-- Records usage statistics
-- **Note**: Never stores actual passwords!
-
-### 🚨 Alert System Contract
-- Emits real-time security events
-- Login attempt notifications
-- Suspicious activity alerts
-- Password breach detection
-- Unauthorized access warnings
-
-### 🛡️ Access Control Contract
-- Device registry management
-- Trust/revoke device access
-- Last seen tracking
-- Multi-device support
-
-### 🔄 Recovery Contract
-- Guardian-based recovery system
-- Multi-signature approvals
-- Vault ownership transfer
-- Lost key recovery
-
-## 🧪 Testing
-
-```bash
-# Run all tests
-sui move test
-
-# Run specific test module
-sui move test --filter vault_tests
-
-# Run with coverage
-sui move test --coverage
-```
-
-## 📊 Data Flow
-
-```
-PRIVATE KEY (local, never uploaded)
-     ↓
-GENERATE PASSWORD (browser, using Seal)
-     ↓
-USE PASSWORD (on facebook.com)
-     ↓
-RECORD USAGE (password_entry.move)
-     ↓
-EMIT EVENT (alert_system.move)
-     ↓
-BACKEND LISTENS (Sui event listener)
-     ↓
-SEND NOTIFICATION (push/email/websocket)
-     ↓
-USER GETS ALERT ✅
-```
-
-## 🔧 Environment Variables
-
-Create `.env` file in project root:
-
-```bash
-# Sui Network
+VAULT_PACKAGE_ID=0x6d30e6996ab01fd91d80babc05d316800cff3a8c2d54d96452e6f75d4b127276
 SUI_NETWORK=testnet
-SUI_RPC_URL=https://fullnode.testnet.sui.io:443
-
-# Contract Addresses (fill after deployment)
-VAULT_PACKAGE_ID=
-PASSWORD_ENTRY_PACKAGE_ID=
-ALERT_SYSTEM_PACKAGE_ID=
-
-# Walrus Configuration
-WALRUS_AGGREGATOR_URL=https://aggregator.walrus-testnet.walrus.space
 WALRUS_PUBLISHER_URL=https://publisher.walrus-testnet.walrus.space
-
-# Admin Wallet (KEEP SECRET!)
-ADMIN_PRIVATE_KEY=
-ADMIN_ADDRESS=
-
-# Frontend
-NEXT_PUBLIC_SUI_NETWORK=testnet
-NEXT_PUBLIC_VAULT_PACKAGE_ID=
+WALRUS_AGGREGATOR_URL=https://aggregator.walrus-testnet.walrus.space
+PORT=3001
+WS_PORT=3002
 ```
 
-## 🎯 Key Features
+## API Endpoints
 
-✅ **Zero-Knowledge Passwords** - Generated on-the-fly, never stored
-✅ **Real-Time Alerts** - Instant notifications for any password usage
-✅ **Device Whitelisting** - Only authorized devices can access passwords
-✅ **Decentralized Storage** - Encrypted data stored on Walrus
-✅ **Multi-Sig Recovery** - Guardian-based account recovery
-✅ **zkLogin Support** - Google/Apple login integration
+**Vault Operations:**
+- `POST /api/vault` - Create vault transaction
+- `GET /api/vault/:vaultId` - Get vault from Sui
+- `POST /api/vault/data/store` - Upload encrypted vault to Walrus
+- `GET /api/vault/:vaultId/data` - Download vault from Walrus
 
-## 🔒 Security Model
+**Alerts & Activity:**
+- `GET /api/alerts?vault_id=X` - Get alerts with pagination
+- `GET /api/activity/:vault_id` - Get activity history
+- `GET /api/alerts/stats/:vault_id` - Alert statistics
 
-- **Private keys never leave the device**
-- **Passwords are deterministically generated**
-- **Only metadata stored on-chain**
-- **End-to-end encryption with Seal**
-- **Real-time breach detection**
-- **Multi-device access control**
+**WebSocket:**
+- Connect: `ws://localhost:3002`
+- Subscribe: `{"type":"subscribe","vaultId":"0x..."}`
+- Receives: Login attempts, suspicious activity, breach alerts
 
-## 📚 Next Steps
+## Key Services
 
-1. ✅ **Contracts** - Complete and tested
-2. ⏭️ **Frontend** - zkLogin integration
-3. ⏭️ **Backend** - Sui event listener
-4. ⏭️ **Extension** - Browser password manager
+**Sui Event Listener** (`services/sui/eventListener.ts`):
+- Polls blockchain every 5 seconds for alert_system events
+- Processes: LoginAttempt, SuspiciousActivity, PasswordBreach, UnauthorizedAccess
+- Creates alerts and triggers WebSocket notifications
 
-## 🤝 Contributing
+**Anomaly Detection** (`services/analytics/anomalyDetection.ts`):
+- Detects: Unknown devices, new IPs, unusual login times, rapid login attempts
+- Severity scoring: low/medium/high/critical
+- Confidence-based alerting (>50% triggers notification)
 
-1. Fork the repository
-2. Create feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit pull request
+**Walrus Storage** (`services/walrus/storage.ts`):
+- Uses testnet publisher endpoint (devnet unstable)
+- Handles encrypted blob uploads/downloads
+- 5 epoch storage duration
 
-## 📄 License
+## Tech Stack
 
-MIT License - see LICENSE file for details
+- **Runtime**: Node.js 18+ with TypeScript
+- **Framework**: Express.js + WebSocket (ws)
+- **Blockchain**: @mysten/sui.js for Sui integration
+- **Storage**: Axios for Walrus HTTP API
+- **Security**: Helmet, CORS, rate limiting (100 req/15min)
+- **Logging**: Winston with configurable log levels
+
+## Development
+```bash
+npm run dev     # Start with nodemon hot reload
+npm run build   # Compile TypeScript to dist/
+npm test        # Run test suite
+npm run lint    # Check code quality
+```
+
+**Project Structure:**
+```
+src/
+├── controllers/    # Request handlers
+├── services/       # Business logic (Sui, Walrus, WebSocket)
+├── middleware/     # Auth, rate limiting, logging
+├── models/         # Data models (Alert, Activity, Vault)
+├── routes/         # API route definitions
+├── config/         # Environment & service configs
+└── utils/          # Crypto, logging, validation
+```
+
+## Production Notes
+
+- Replace in-memory storage with PostgreSQL/MongoDB
+- Enable database for activity history and alert persistence
+- Configure JWT authentication for API endpoints
+- Set up Redis for WebSocket connection scaling
+- Use PM2 or Docker for process management
+- Monitor Sui RPC rate limits (consider paid tier)
+
+## Error Handling
+
+- `400` - Validation errors
+- `404` - Vault/resource not found
+- `429` - Rate limit exceeded
+- `503` - Sui/Walrus service unavailable
+
+Graceful shutdown on SIGTERM/SIGINT closes WebSocket connections and stops event listener.
